@@ -577,6 +577,38 @@ const loginStyles = StyleSheet.create({
     marginTop: 20,
     fontWeight: "600",
   },
+  counterText: {
+    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#555", // gray-ish, you can change
+  },
+
+  skuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  infoBox: {
+    height: 40,
+    marginLeft: 6,
+    textAlign: "center",
+    backgroundColor: "#f0f0f0",
+    borderColor: "#aaa",
+    borderWidth: 1,
+    padding: 10,
+    borderRadius: 4,
+  },
+
+  readOnly: {
+    backgroundColor: "#f0f0f0",
+    borderColor: "#aaa",
+  },
+  editable: {
+    backgroundColor: "#fff",
+    borderColor: "#844515",
+  },
 
   pickerWrapperQTT: {
     height: 50,
@@ -585,6 +617,26 @@ const loginStyles = StyleSheet.create({
     borderRadius: 6,
     overflow: "hidden",
     color: "black", // ensures borderRadius is applied
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainerCategory: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderRadius: 10,
+    width: "80%",
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+    textAlign: "center",
   },
 
   pickerQTT: {

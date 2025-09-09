@@ -8,7 +8,9 @@ import moment from "moment";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Button,
   Keyboard,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
@@ -130,7 +132,15 @@ const InventoryProcess = () => {
   const [week, setWeek] = useState("");
   const [sku, setSku] = useState("");
   const [selectedSkuCode, setSelectedSkuCode] = useState("");
+
+  const [expandedCategory, setExpandedCategory] = useState(null);
+  const [showCarryPrompt, setShowCarryPrompt] = useState<string | null>(null);
+
   const [availability, setAvailability] = useState<{
+    [version: string]: { [skuKey: string]: string };
+  }>({});
+
+  const [rtvReason, setRtvReason] = useState<{
     [version: string]: { [skuKey: string]: string };
   }>({});
 
@@ -155,6 +165,11 @@ const InventoryProcess = () => {
     oos: {},
   });
   const router = useRouter();
+
+  const openCategoryForm = (category: any) => {
+    setExpandedCategory(category);
+    // any other setup code you had before
+  };
 
   const handleExpiryChange = (skuKey: string, month: string) => {
     setSkuValues((prev: any) => ({
@@ -445,149 +460,38 @@ const InventoryProcess = () => {
     loadOutlets();
   }, []);
 
+  const mvpOnlyBranches = [
+    "S&R ALABANG",
+    "S&R ASEANA",
+    "S&R BACOOR",
+    "S&R BALIUAG",
+    "S&R CIRCUIT MAKATI",
+    "S&R COMMONWEALTH",
+    "S&R CONGRESSIONAL",
+    "S&R DAU MABALACAT",
+    "S&R IMUS",
+    "S&R KAWIT",
+    "S&R LIBIS BAGUMBAYAN",
+    "S&R LIPA BATANGAS",
+    "S&R MARIKINA",
+    "S&R NEW MANILA",
+    "S&R NUVALI",
+    "S&R PARANAQUE",
+    "S&R SAN FERNANDO",
+    "S&R SHAW",
+    "S&R STO TOMAS",
+    "S&R SUCAT",
+    "S&R THE FORT",
+  ];
+
   const skuData: {
     [version: string]: { label: string; value: string; code: string }[];
   } = {
     ICECREAM: [
       {
-        label: "COOKIE DOUGH 115ML X 1, CUP",
-        value: "COOKIE DOUGH 115ML X 1, CUP",
-        code: "4806526540572",
-      },
-      {
-        label: "STRAWBERRY 115ML X 1, CUP",
-        value: "STRAWBERRY 115ML X 1, CUP",
-        code: "4806526540558",
-      },
-      {
-        label: "DARK CHOCOLATE 115ML X 1, CUP",
-        value: "DARK CHOCOLATE 115ML X 1, CUP",
-        code: "4806526540473",
-      },
-      {
-        label: "EVERYONE LOVES VANILLA 115ML X 1, CUP",
-        value: "EVERYONE LOVES VANILLA 115ML X 1, CUP",
-        code: "4806526540602",
-      },
-      {
-        label: "SALTED CARAMEL 115ML X 1, CUP",
-        value: "SALTED CARAMEL 115ML X 1, CUP",
-        code: "4806526540428",
-      },
-      {
-        label: "COOKIES AND CREAM 115ML X 1, CUP",
-        value: "COOKIES AND CREAM 115ML X 1, CUP",
-        code: "4806526540565",
-      },
-      {
         label: "BBUTTER ALMOND BRITTLE 115ML X 1, CUP",
         value: "BBUTTER ALMOND BRITTLE 115ML X 1, CUP",
         code: "4806526540459",
-      },
-      {
-        label: "COFFEE ALMOND FUDGE 115ML X 1, CUP",
-        value: "COFFEE ALMOND FUDGE 115ML X 1, CUP",
-        code: "4806526540633",
-      },
-      {
-        label: "BRAZILLIAN COFFEE 115ML X 1, CUP",
-        value: "BRAZILLIAN COFFEE 115ML X 1, CUP",
-        code: "4806526540411",
-      },
-      {
-        label: "ROCKY ROAD 115ML X 1, CUP",
-        value: "ROCKY ROAD 115ML X 1, CUP",
-        code: "4806526540466",
-      },
-      {
-        label: "MALTED MILK 115ML X 1, CUP",
-        value: "MALTED MILK 115ML X 1, CUP",
-        code: "4806526540442",
-      },
-      {
-        label: "HE'S NOT WORTH IT 115ML X 1, CUP",
-        value: "HE'S NOT WORTH IT 115ML X 1, CUP",
-        code: "4806526540725",
-      },
-      {
-        label: "BUTTER PECAN 115ML X 1, CUP",
-        value: "BUTTER PECAN 115ML X 1, CUP",
-        code: "4806526540435",
-      },
-      {
-        label: "PISTACHIO 115ML X 1, CUP",
-        value: "PISTACHIO 115ML X 1, CUP",
-        code: "4806526540510",
-      },
-      {
-        label: "PISTACHIO ALMOND FUDGE 115ML X 1, CUP",
-        value: "PISTACHIO ALMOND FUDGE 115ML X 1, CUP",
-        code: "4806526540640",
-      },
-      {
-        label: "JOLLY OL' EGGNOG 115ML X 1, CUP",
-        value: "JOLLY OL' EGGNOG 115ML X 1, CUP",
-        code: "634240230783",
-      },
-      {
-        label: "MERRY MINT CHOCOLATE 115ML X 1, CUP",
-        value: "MERRY MINT CHOCOLATE 115ML X 1, CUP",
-        code: "634240230806",
-      },
-      {
-        label: "S'MORES THE MERRIER 115ML X 1, CUP",
-        value: "S'MORES THE MERRIER 115ML X 1, CUP",
-        code: "634240230820",
-      },
-      {
-        label: "LITE MANGO 115ML X 1, CUP",
-        value: "LITE MANGO 115ML X 1, CUP",
-        code: "634240269028",
-      },
-      {
-        label: "LITE STRAWBERRY 115ML X 1, CUP",
-        value: "LITE STRAWBERRY 115ML X 1, CUP",
-        code: "634240269042",
-      },
-      {
-        label: "LITE MIXED BERRIES 115ML X 1, CUP",
-        value: "LITE MIXED BERRIES 115ML X 1, CUP",
-        code: "634240269066",
-      },
-      {
-        label: "STRAWBERRY CHEESECAKE 115ML X 1, CUP",
-        value: "STRAWBERRY CHEESECAKE 115ML X 1, CUP",
-        code: "634240292477",
-      },
-      {
-        label: "COOKIE DOUGH 440ML X 1, PINT",
-        value: "COOKIE DOUGH 440ML X 1, PINT",
-        code: "4806526540176",
-      },
-      {
-        label: "STRAWBERRY 440ML X 1, PINT",
-        value: "STRAWBERRY 440ML X 1, PINT",
-        code: "4806526540152",
-      },
-      {
-        label: "DARK CHOCOLATE 440ML X 1, PINT",
-        value: "DARK CHOCOLATE 440ML X 1, PINT",
-        code: "4806526540060",
-      },
-      {
-        label: "EVERYONE LOVES VANILLA 440ML X 1, PINT",
-        value: "EVERYONE LOVES VANILLA 440ML X 1, PINT",
-        code: "4806526540206",
-      },
-      {
-        label: "SALTED CARAMEL 440ML X 1, PINT",
-        value: "SALTED CARAMEL 440ML X 1, PINT",
-        code: "4806526540015",
-      },
-      {
-        label: "COOKIES AND CREAM 440ML X 1, PINT",
-        value: "COOKIES AND CREAM 440ML X 1, PINT",
-        code: "4806526540169",
       },
       {
         label: "BBUTTER ALMOND BRITTLE 440ML X 1, PINT",
@@ -595,9 +499,9 @@ const InventoryProcess = () => {
         code: "4806526540046",
       },
       {
-        label: "COFFEE ALMOND FUDGE 440ML X 1, PINT",
-        value: "COFFEE ALMOND FUDGE 440ML X 1, PINT",
-        code: "4806526540237",
+        label: "BRAZILLIAN COFFEE 115ML X 1, CUP",
+        value: "BRAZILLIAN COFFEE 115ML X 1, CUP",
+        code: "4806526540411",
       },
       {
         label: "BRAZILLIAN COFFEE 440ML X 1, PINT",
@@ -605,19 +509,9 @@ const InventoryProcess = () => {
         code: "4806526540008",
       },
       {
-        label: "ROCKY ROAD 440ML X 1, PINT",
-        value: "ROCKY ROAD 440ML X 1, PINT",
-        code: "4806526540053",
-      },
-      {
-        label: "MALTED MILK 440ML X 1, PINT",
-        value: "MALTED MILK 440ML X 1, PINT",
-        code: "4806526540039",
-      },
-      {
-        label: "HE'S NOT WORTH IT 440ML X 1, PINT",
-        value: "HE'S NOT WORTH IT 440ML X 1, PINT",
-        code: "4806526540312",
+        label: "BUTTER PECAN 115ML X 1, CUP",
+        value: "BUTTER PECAN 115ML X 1, CUP",
+        code: "4806526540435",
       },
       {
         label: "BUTTER PECAN 440ML X 1, PINT",
@@ -625,14 +519,69 @@ const InventoryProcess = () => {
         code: "4806526540022",
       },
       {
-        label: "PISTACHIO 440ML X 1, PINT",
-        value: "PISTACHIO 440ML X 1, PINT",
-        code: "4806526540107",
+        label: "COFFEE ALMOND FUDGE 115ML X 1, CUP",
+        value: "COFFEE ALMOND FUDGE 115ML X 1, CUP",
+        code: "4806526540633",
       },
       {
-        label: "PISTACHIO ALMOND FUDGE 440ML X 1, PINT",
-        value: "PISTACHIO ALMOND FUDGE 440ML X 1, PINT",
-        code: "4806526540244",
+        label: "COFFEE ALMOND FUDGE 440ML X 1, PINT",
+        value: "COFFEE ALMOND FUDGE 440ML X 1, PINT",
+        code: "4806526540237",
+      },
+      {
+        label: "COOKIE DOUGH 115ML X 1, CUP",
+        value: "COOKIE DOUGH 115ML X 1, CUP",
+        code: "4806526540572",
+      },
+      {
+        label: "COOKIE DOUGH 440ML X 1, PINT",
+        value: "COOKIE DOUGH 440ML X 1, PINT",
+        code: "4806526540176",
+      },
+      {
+        label: "COOKIES AND CREAM 115ML X 1, CUP",
+        value: "COOKIES AND CREAM 115ML X 1, CUP",
+        code: "4806526540565",
+      },
+      {
+        label: "COOKIES AND CREAM 440ML X 1, PINT",
+        value: "COOKIES AND CREAM 440ML X 1, PINT",
+        code: "4806526540169",
+      },
+      {
+        label: "DARK CHOCOLATE 115ML X 1, CUP",
+        value: "DARK CHOCOLATE 115ML X 1, CUP",
+        code: "4806526540473",
+      },
+      {
+        label: "DARK CHOCOLATE 440ML X 1, PINT",
+        value: "DARK CHOCOLATE 440ML X 1, PINT",
+        code: "4806526540060",
+      },
+      {
+        label: "EVERYONE LOVES VANILLA 115ML X 1, CUP",
+        value: "EVERYONE LOVES VANILLA 115ML X 1, CUP",
+        code: "4806526540602",
+      },
+      {
+        label: "EVERYONE LOVES VANILLA 440ML X 1, PINT",
+        value: "EVERYONE LOVES VANILLA 440ML X 1, PINT",
+        code: "4806526540206",
+      },
+      {
+        label: "HE'S NOT WORTH IT 115ML X 1, CUP",
+        value: "HE'S NOT WORTH IT 115ML X 1, CUP",
+        code: "4806526540725",
+      },
+      {
+        label: "HE'S NOT WORTH IT 440ML X 1, PINT",
+        value: "HE'S NOT WORTH IT 440ML X 1, PINT",
+        code: "4806526540312",
+      },
+      {
+        label: "JOLLY OL' EGGNOG 115ML X 1, CUP",
+        value: "JOLLY OL' EGGNOG 115ML X 1, CUP",
+        code: "634240230783",
       },
       {
         label: "JOLLY OL' EGGNOG 440ML X 1, PINT",
@@ -640,14 +589,9 @@ const InventoryProcess = () => {
         code: "634240230790",
       },
       {
-        label: "MERRY MINT CHOCOLATE 440ML X 1, PINT",
-        value: "MERRY MINT CHOCOLATE 440ML X 1, PINT",
-        code: "634240230813",
-      },
-      {
-        label: "S'MORES THE MERRIER 440ML X 1, PINT",
-        value: "S'MORES THE MERRIER 440ML X 1, PINT",
-        code: "634240230837",
+        label: "LITE MANGO 115ML X 1, CUP",
+        value: "LITE MANGO 115ML X 1, CUP",
+        code: "634240269028",
       },
       {
         label: "LITE MANGO 440ML X 1, PINT",
@@ -655,14 +599,109 @@ const InventoryProcess = () => {
         code: "634240269011",
       },
       {
-        label: "LITE STRAWBERRY 440ML X 1, PINT",
-        value: "LITE STRAWBERRY 440ML X 1, PINT",
-        code: "634240269035",
+        label: "LITE MIXED BERRIES 115ML X 1, CUP",
+        value: "LITE MIXED BERRIES 115ML X 1, CUP",
+        code: "634240269066",
       },
       {
         label: "LITE MIXED BERRIES 440ML X 1, PINT",
         value: "LITE MIXED BERRIES 440ML X 1, PINT",
         code: "634240269059",
+      },
+      {
+        label: "LITE STRAWBERRY 115ML X 1, CUP",
+        value: "LITE STRAWBERRY 115ML X 1, CUP",
+        code: "634240269042",
+      },
+      {
+        label: "LITE STRAWBERRY 440ML X 1, PINT",
+        value: "LITE STRAWBERRY 440ML X 1, PINT",
+        code: "634240269035",
+      },
+      {
+        label: "MALTED MILK 115ML X 1, CUP",
+        value: "MALTED MILK 115ML X 1, CUP",
+        code: "4806526540442",
+      },
+      {
+        label: "MALTED MILK 440ML X 1, PINT",
+        value: "MALTED MILK 440ML X 1, PINT",
+        code: "4806526540039",
+      },
+      {
+        label: "MERRY MINT CHOCOLATE 115ML X 1, CUP",
+        value: "MERRY MINT CHOCOLATE 115ML X 1, CUP",
+        code: "634240230806",
+      },
+      {
+        label: "MERRY MINT CHOCOLATE 440ML X 1, PINT",
+        value: "MERRY MINT CHOCOLATE 440ML X 1, PINT",
+        code: "634240230813",
+      },
+      {
+        label: "PISTACHIO 115ML X 1, CUP",
+        value: "PISTACHIO 115ML X 1, CUP",
+        code: "4806526540510",
+      },
+      {
+        label: "PISTACHIO 440ML X 1, PINT",
+        value: "PISTACHIO 440ML X 1, PINT",
+        code: "4806526540107",
+      },
+      {
+        label: "PISTACHIO ALMOND FUDGE 115ML X 1, CUP",
+        value: "PISTACHIO ALMOND FUDGE 115ML X 1, CUP",
+        code: "4806526540640",
+      },
+      {
+        label: "PISTACHIO ALMOND FUDGE 440ML X 1, PINT",
+        value: "PISTACHIO ALMOND FUDGE 440ML X 1, PINT",
+        code: "4806526540244",
+      },
+      {
+        label: "ROCKY ROAD 115ML X 1, CUP",
+        value: "ROCKY ROAD 115ML X 1, CUP",
+        code: "4806526540466",
+      },
+      {
+        label: "ROCKY ROAD 440ML X 1, PINT",
+        value: "ROCKY ROAD 440ML X 1, PINT",
+        code: "4806526540053",
+      },
+      {
+        label: "S'MORES THE MERRIER 115ML X 1, CUP",
+        value: "S'MORES THE MERRIER 115ML X 1, CUP",
+        code: "634240230820",
+      },
+      {
+        label: "S'MORES THE MERRIER 440ML X 1, PINT",
+        value: "S'MORES THE MERRIER 440ML X 1, PINT",
+        code: "634240230837",
+      },
+      {
+        label: "SALTED CARAMEL 115ML X 1, CUP",
+        value: "SALTED CARAMEL 115ML X 1, CUP",
+        code: "4806526540428",
+      },
+      {
+        label: "SALTED CARAMEL 440ML X 1, PINT",
+        value: "SALTED CARAMEL 440ML X 1, PINT",
+        code: "4806526540015",
+      },
+      {
+        label: "STRAWBERRY 115ML X 1, CUP",
+        value: "STRAWBERRY 115ML X 1, CUP",
+        code: "4806526540558",
+      },
+      {
+        label: "STRAWBERRY 440ML X 1, PINT",
+        value: "STRAWBERRY 440ML X 1, PINT",
+        code: "4806526540152",
+      },
+      {
+        label: "STRAWBERRY CHEESECAKE 115ML X 1, CUP",
+        value: "STRAWBERRY CHEESECAKE 115ML X 1, CUP",
+        code: "634240292477",
       },
       {
         label: "STRAWBERRY CHEESECAKE 440ML X 1, PINT",
@@ -673,97 +712,98 @@ const InventoryProcess = () => {
 
     DAIRY: [
       {
+        label: "BARISTA FRESH MILK 1L",
+        value: "BARISTA FRESH MILK 1L",
+        code: "634240292446",
+      },
+      {
+        label: "HOLLY'S LOW-FAT YOGHURT 1L",
+        value: "HOLLY'S LOW-FAT YOGHURT 1L",
+        code: "4806526460153",
+      },
+      {
+        label: "HOLLY'S LOW-FAT YOGHURT 200ML",
+        value: "HOLLY'S LOW-FAT YOGHURT 200ML",
+        code: "",
+      },
+      {
+        label: "HOLLY'S LOW-FAT YOGHURT 500ML",
+        value: "HOLLY'S LOW-FAT YOGHURT 500ML",
+        code: "",
+      },
+      {
+        label: "KESONG PUTI 200G",
+        value: "KESONG PUTI 200G",
+        code: "634240256735",
+      },
+      {
+        label: "PREMIUM CHOCOLATE MILK 1L",
+        value: "PREMIUM CHOCOLATE MILK 1L",
+        code: "634240292408",
+      },
+      {
+        label: "PREMIUM CHOCOLATE MILK 300ML",
+        value: "PREMIUM CHOCOLATE MILK 300ML",
+        code: "",
+      },
+      {
+        label: "PREMIUM LOW-FAT MILK 1L",
+        value: "PREMIUM LOW-FAT MILK 1L",
+        code: "634240292385",
+      },
+      {
+        label: "PREMIUM LOW-FAT MILK 200ML",
+        value: "PREMIUM LOW-FAT MILK 200ML",
+        code: "",
+      },
+      {
+        label: "PREMIUM LOW-FAT MILK 300ML",
+        value: "PREMIUM LOW-FAT MILK 300ML",
+        code: "",
+      },
+      {
         label: "PREMIUM WHOLE MILK 1L",
         value: "PREMIUM WHOLE MILK 1L",
         code: "634240292361",
       },
-      // {
-      //   label: "PREMIUM WHOLE MILK 300ML",
-      //   value: "PREMIUM WHOLE MILK 300ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "PREMIUM WHOLE MILK 200ML",
-      //   value: "PREMIUM WHOLE MILK 200ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "PREMIUM LOW-FAT MILK 1L",
-      //   value: "PREMIUM LOW-FAT MILK 1L",
-      //   code: "634240292385",
-      // },
-      // {
-      //   label: "PREMIUM LOW-FAT MILK 300ML",
-      //   value: "PREMIUM LOW-FAT MILK 300ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "PREMIUM LOW-FAT MILK 200ML",
-      //   value: "PREMIUM LOW-FAT MILK 200ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "PREMIUM CHOCOLATE MILK 1L",
-      //   value: "PREMIUM CHOCOLATE MILK 1L",
-      //   code: "634240292408",
-      // },
-      // {
-      //   label: "PREMIUM CHOCOLATE MILK 300ML",
-      //   value: "PREMIUM CHOCOLATE MILK 300ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "BARISTA FRESH MILK 1L",
-      //   value: "BARISTA FRESH MILK 1L",
-      //   code: "634240292446",
-      // },
-      // {
-      //   label: "HOLLY'S LOW-FAT YOGHURT 1L",
-      //   value: "HOLLY'S LOW-FAT YOGHURT 1L",
-      //   code: "4806526460153",
-      // },
-      // {
-      //   label: "HOLLY'S LOW-FAT YOGHURT 200ML",
-      //   value: "HOLLY'S LOW-FAT YOGHURT 200ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "HOLLY'S LOW-FAT YOGHURT 500ML",
-      //   value: "HOLLY'S LOW-FAT YOGHURT 500ML",
-      //   code: "",
-      // },
-      // {
-      //   label: "KESONG PUTI 200G",
-      //   value: "KESONG PUTI 200G",
-      //   code: "634240256735",
-      // },
+      {
+        label: "PREMIUM WHOLE MILK 200ML",
+        value: "PREMIUM WHOLE MILK 200ML",
+        code: "",
+      },
+      {
+        label: "PREMIUM WHOLE MILK 300ML",
+        value: "PREMIUM WHOLE MILK 300ML",
+        code: "",
+      },
     ],
+
     MVP: [
+      {
+        label: "BATAVIA LETTUCE",
+        value: "BATAVIA LETTUCE",
+        code: "",
+      },
+      {
+        label: "BUTTERHEAD LETTUCE",
+        value: "BUTTERHEAD LETTUCE",
+        code: "",
+      },
       {
         label: "CRISTAL LETTUCE",
         value: "CRISTAL LETTUCE",
         code: "",
       },
-      // {
-      //   label: "BUTTERHEAD LETTUCE",
-      //   value: "BUTTERHEAD LETTUCE",
-      //   code: "",
-      // },
-      // {
-      //   label: "SALANOVA LETTUCE",
-      //   value: "SALANOVA LETTUCE",
-      //   code: "",
-      // },
-      // {
-      //   label: "ROMAINE LETTUCE",
-      //   value: "ROMAINE LETTUCE",
-      //   code: "",
-      // },
-      // {
-      //   label: "BATAVIA LETTUCE",
-      //   value: "BATAVIA LETTUCE",
-      //   code: "",
-      // },
+      {
+        label: "ROMAINE LETTUCE",
+        value: "ROMAINE LETTUCE",
+        code: "",
+      },
+      {
+        label: "SALANOVA LETTUCE",
+        value: "SALANOVA LETTUCE",
+        code: "",
+      },
     ],
   };
 
@@ -782,7 +822,7 @@ const InventoryProcess = () => {
           completedCount++;
         } else {
           if (v === "MVP") {
-            // ✅ For MVP, check both Harvest and OOS are filled
+            // ✅ MVP: Only requires Harvest
             const harvestList = skuValues.harvest?.[v]?.[key] || [];
             const isValidHarvest = harvestList.some(
               (entry: { date?: string; quantity?: string | number }) =>
@@ -792,21 +832,26 @@ const InventoryProcess = () => {
                 Number(entry.quantity) > 0
             );
 
-            const oos = skuValues.oos?.[v]?.[key] || "";
-
-            if (isValidHarvest && oos !== "") {
-              completedCount++;
+            if (isValidHarvest) {
+              completedCount++; // ✅ Count once per SKU
             }
-          } else {
-            // ✅ For DAIRY and ICECREAM
+          } else if (v === "DAIRY") {
+            // ✅ DAIRY: Both Beginning + Delivery required
             const b = skuValues.beginning?.[v]?.[key] || "";
             const d = skuValues.delivery?.[v]?.[key] || "";
-            const r = skuValues.rtv?.[v]?.[key] || "";
             const e = skuValues.ending?.[v]?.[key] || "";
-            const o = skuValues.oos?.[v]?.[key] || "";
 
-            if (b !== "" && d !== "" && r !== "" && e !== "" && o !== "") {
-              completedCount++;
+            if (b !== "" && d !== "" && e !== "") {
+              completedCount++; // ✅ Count once only if BOTH filled
+            }
+          } else if (v === "ICECREAM") {
+            // ✅ ICECREAM: Requires Beginning + Delivery + Ending
+            const b = skuValues.beginning?.[v]?.[key] || "";
+            const d = skuValues.delivery?.[v]?.[key] || "";
+            const e = skuValues.ending?.[v]?.[key] || "";
+
+            if (b !== "" && d !== "" && e !== "") {
+              completedCount++; // ✅ Count once only if ALL filled
             }
           }
         }
@@ -852,21 +897,21 @@ const InventoryProcess = () => {
 
   const handleConditionalSubmit = () => {
     const incompleteVersions: string[] = [];
+    const completedVersions: string[] = [];
 
-    ["ICECREAM", "DAIRY", "MVP"].forEach((version) => {
+    ["DAIRY", "ICECREAM", "MVP"].forEach((version) => {
       const skuList = skuData[version] || [];
 
       const isVersionComplete = skuList.every((sku) => {
         const key = sku.value;
         const status = availability[version]?.[key];
 
-        // Not Carried or Delisted are automatically complete
         if (status === "Not Carried" || status === "Delisted") return true;
 
+        // ✅ MVP: Only Harvest required
         if (version === "MVP") {
           const harvestList = skuValues.harvest?.[version]?.[key] || [];
 
-          // Must have at least 1 fully filled entry and no blank ones
           const hasValidEntry = harvestList.some(
             (entry: { date: string; quantity: string | number }) =>
               !!entry?.date &&
@@ -883,23 +928,32 @@ const InventoryProcess = () => {
               Number(entry.quantity) <= 0
           );
 
-          const oosValue = skuValues.oos?.[version]?.[key];
-
-          const isOOSValid = oosValue !== undefined && oosValue !== "";
-
-          return hasValidEntry && !hasInvalidEntry && isOOSValid;
+          return hasValidEntry && !hasInvalidEntry;
         }
 
-        // For DAIRY and ICECREAM
-        const hasAllValues =
-          skuValues.beginning?.[version]?.[key] !== "" &&
-          skuValues.delivery?.[version]?.[key] !== "" &&
-          skuValues.ending?.[version]?.[key] !== "";
+        // ✅ ICECREAM: Only Beginning + Delivery + Ending
+        if (version === "ICECREAM") {
+          const b = skuValues.beginning?.[version]?.[key] || "";
+          const d = skuValues.delivery?.[version]?.[key] || "";
+          const e = skuValues.ending?.[version]?.[key] || "";
 
-        return hasAllValues;
+          return b !== "" && d !== "" && e !== "";
+        }
+
+        // ✅ DAIRY: Only Beginning + Delivery
+        if (version === "DAIRY") {
+          const b = skuValues.beginning?.[version]?.[key] || "";
+          const d = skuValues.delivery?.[version]?.[key] || "";
+
+          return b !== "" && d !== "";
+        }
+
+        return false;
       });
 
-      if (!isVersionComplete) {
+      if (isVersionComplete) {
+        completedVersions.push(version);
+      } else {
         incompleteVersions.push(version);
       }
     });
@@ -907,7 +961,9 @@ const InventoryProcess = () => {
     if (incompleteVersions.length > 0) {
       Alert.alert(
         "Incomplete SKUs",
-        `Please complete all SKUs in: ${incompleteVersions.join(", ")}`,
+        `You have completed: ${
+          completedVersions.join(", ") || "None"
+        }\nPlease complete: ${incompleteVersions.join(", ")}`,
         [{ text: "OK" }]
       );
     } else {
@@ -953,20 +1009,13 @@ const InventoryProcess = () => {
 
         const commonFields =
           v === "MVP"
-            ? {
-                sku: skuItem.label,
-                skuCode: skuKey,
-              }
-            : {
-                sku: skuItem.label,
-                skuCode: skuKey,
-                code: skuItem.code,
-              };
+            ? { sku: skuItem.label, skuCode: skuKey }
+            : { sku: skuItem.label, skuCode: skuKey, code: skuItem.code };
 
         if (status === "Carried") {
           if (v === "MVP") {
+            // ✅ MVP: Harvest only (expiry/oos not required)
             const harvestList = skuValues.harvest?.[v]?.[skuKey] || [];
-
             const validHarvest = harvestList.filter(
               (entry: { date: string; quantity: string | number }) =>
                 !!entry?.date &&
@@ -975,95 +1024,59 @@ const InventoryProcess = () => {
                 Number(entry.quantity) > 0
             );
 
-            if (
-              harvestList.length > 0 &&
-              validHarvest.length !== harvestList.length
-            ) {
-              setLoading(false);
-              Alert.alert(
-                "Error",
-                `Some harvest entries for SKU ${skuItem.label} are incomplete. Please fill in all fields or remove blank ones.`
-              );
-              return;
-            }
-
             groupedInventory.versions[v][status].push({
               ...commonFields,
-              harvest: validHarvest.map(
-                (entry: { date: string; quantity: string | number }) => ({
-                  date: entry.date,
-                  quantity: Number(entry.quantity),
-                })
-              ),
-              expiry: [], // MVP does not use expiry
-              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0),
-            });
-          } else if (v === "ICECREAM") {
-            const expiryList = skuValues.expiry?.[v]?.[skuKey] || [];
-
-            const validExpiry = expiryList.filter(
-              (entry: { date: string; quantity: string | number }) =>
-                !!entry?.date &&
-                entry?.quantity !== "" &&
-                !isNaN(Number(entry.quantity)) &&
-                Number(entry.quantity) > 0
-            );
-
-            if (
-              expiryList.length > 0 &&
-              validExpiry.length !== expiryList.length
-            ) {
-              setLoading(false);
-              Alert.alert(
-                "Error",
-                `Some expiry entries for SKU ${skuItem.label} are incomplete. Please fill in all fields or remove blank ones.`
-              );
-              return;
-            }
-
-            const beginning = Number(skuValues.beginning?.[v]?.[skuKey] || 0);
-            const delivery = Number(skuValues.delivery?.[v]?.[skuKey] || 0);
-            const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0);
-            const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0);
-            const offtake = beginning + delivery - rtv - ending;
-
-            groupedInventory.versions[v][status].push({
-              ...commonFields,
-              beginningPCS: beginning,
-              deliveryPCS: delivery,
-              rtvPCS: rtv,
-              endingPCS: ending,
-              offtake,
-              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0),
-              harvest: [], // ICECREAM does not use harvest
-              expiry: validExpiry.map(
-                (entry: { date: string; quantity: string | number }) => ({
-                  date: entry.date,
-                  quantity: Number(entry.quantity),
-                })
-              ),
+              harvest: validHarvest.map((entry: any) => ({
+                date: entry.date,
+                quantity: Number(entry.quantity),
+              })),
+              expiry: [], // not required
+              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0), // optional
+              totalOfftake: 0,
+              usageCount: 0,
+              avgOfftake: 0,
             });
           } else {
-            // DAIRY
+            // ✅ DAIRY + ICECREAM
             const beginning = Number(skuValues.beginning?.[v]?.[skuKey] || 0);
             const delivery = Number(skuValues.delivery?.[v]?.[skuKey] || 0);
-            const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0);
-            const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0);
+            const rtvNo = skuValues.rtvNo?.[v] || ""; // optional
+            const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0); // optional
+            const rtvReason = skuValues.rtvReason?.[v]?.[skuKey] || ""; // optional
+            const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0); // optional
+
             const offtake = beginning + delivery - rtv - ending;
 
             groupedInventory.versions[v][status].push({
               ...commonFields,
               beginningPCS: beginning,
               deliveryPCS: delivery,
+              rtvNo,
               rtvPCS: rtv,
+              rtvReason,
               endingPCS: ending,
               offtake,
-              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0),
+              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0), // optional
               harvest: [],
-              expiry: [],
+              expiry: (skuValues.expiry?.[v]?.[skuKey] || [])
+                .filter(
+                  (entry: { date?: string; quantity?: string | number }) =>
+                    !!entry?.date &&
+                    entry?.quantity !== "" &&
+                    !isNaN(Number(entry.quantity)) &&
+                    Number(entry.quantity) > 0
+                )
+                .map((entry: { date: string; quantity: string | number }) => ({
+                  date: entry.date,
+                  quantity: Number(entry.quantity),
+                })),
+              totalOfftake: offtake,
+              usageCount: 0,
+              avgOfftake: offtake,
             });
           }
         } else {
+          // Not Carried / Delisted
           groupedInventory.versions[v][status].push({
             ...commonFields,
             harvest: [],
@@ -1073,11 +1086,39 @@ const InventoryProcess = () => {
       }
     }
 
+    // ✅ Negative offtake check
+    let negativeByCategory: Record<string, string[]> = {};
+    for (const v of versions) {
+      const skus = skuData[v]?.filter((item) => item.value !== "") || [];
+      for (const skuItem of skus) {
+        const skuKey = skuItem.value;
+        const beginning = Number(skuValues.beginning?.[v]?.[skuKey] || 0);
+        const delivery = Number(skuValues.delivery?.[v]?.[skuKey] || 0);
+        const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0);
+        const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0);
+        const offtake = beginning + delivery - rtv - ending;
+
+        if (offtake < 0) {
+          if (!negativeByCategory[v]) negativeByCategory[v] = [];
+          negativeByCategory[v].push(skuItem.label);
+        }
+      }
+    }
+
+    if (Object.keys(negativeByCategory).length > 0) {
+      setLoading(false);
+      let message = "Negative offtake detected:\n\n";
+      for (const [category, skus] of Object.entries(negativeByCategory)) {
+        message += `📦 ${category}:\n  - ${skus.join("\n  - ")}\n\n`;
+      }
+      message += "Please review and adjust their values.";
+      Alert.alert("Error", message);
+      return;
+    }
+
     try {
       const netState = await NetInfo.fetch();
-      if (!netState.isConnected) {
-        return;
-      }
+      if (!netState.isConnected) return;
 
       const res = await fetch(
         "https://api-carmens-best.bmphrc.com/inventory/grouped",
@@ -1156,37 +1197,36 @@ const InventoryProcess = () => {
             value={selectedOutlet}
             items={outletOptions}
             setOpen={setOpen}
-            setValue={setSelectedOutlet}
+            setValue={(callbackOrValue) => {
+              const newValue =
+                typeof callbackOrValue === "function"
+                  ? callbackOrValue(selectedOutlet)
+                  : callbackOrValue;
+
+              // Change outlet
+              setSelectedOutlet(newValue);
+
+              // Clear all inputs
+              setSkuValues({
+                beginning: {},
+                delivery: {},
+                rtv: {},
+                rtvReason: {},
+                ending: {},
+                oos: {},
+                expiry: {},
+                harvest: {},
+              });
+              setAvailability({});
+              setVersion("");
+              setSku("");
+              setExpandedSection(null);
+            }}
             setItems={setOutletOptions}
             searchable
             placeholder="Select Branch"
-            // style={{ width: 407 }}
-            // dropDownContainerStyle={{ width: 407 }}
             listMode="SCROLLVIEW"
           />
-
-          {/* <AndroidPicker
-            label="Weeks Covered"
-            selectedValue={weeksCovered}
-            onValueChange={handleWeeksCoveredChange}
-            items={weekOptions}
-            enabled={false} // Use this instead of editable
-          />
-
-          <LabeledInput
-            label="Month"
-            value={month}
-            onChangeText={setMonth}
-            editable={false}
-            style={{ height: 0, opacity: 0 }}
-          />
-          <LabeledInput
-            label="Week"
-            value={week}
-            onChangeText={setWeek}
-            editable={false}
-            style={{ height: 0, opacity: 0 }}
-          /> */}
 
           <Text style={styles.label}>Select Category</Text>
           <View style={styles.buttonRow}>
@@ -1201,101 +1241,89 @@ const InventoryProcess = () => {
 
                 if (avail === "Not Carried" || avail === "Delisted") {
                   completedSkuCount++;
-                } else {
-                  if (v === "MVP") {
-                    const harvestList = skuValues.harvest?.[v]?.[key] || [];
-                    const isValidHarvest = harvestList.some(
-                      (entry: { date?: string; quantity?: string | number }) =>
-                        !!entry?.date &&
-                        entry?.quantity !== "" &&
-                        !isNaN(Number(entry.quantity)) &&
-                        Number(entry.quantity) > 0
-                    );
+                  return;
+                }
 
-                    const o = skuValues.oos?.[v]?.[key] || "";
+                if (v === "MVP") {
+                  const harvestList = skuValues.harvest?.[v]?.[key] || [];
+                  const isValidHarvest = harvestList.some(
+                    (entry: { date?: string; quantity?: string | number }) =>
+                      !!entry?.date &&
+                      entry?.quantity !== "" &&
+                      !isNaN(Number(entry.quantity)) &&
+                      Number(entry.quantity) > 0
+                  );
+                  const o = skuValues.oos?.[v]?.[key] || "";
 
-                    if (isValidHarvest && o !== "") {
-                      completedSkuCount++;
-                    }
-                  } else {
-                    const b = skuValues.beginning?.[v]?.[key] || "";
-                    const d = skuValues.delivery?.[v]?.[key] || "";
-                    const r = skuValues.rtv?.[v]?.[key] || "";
-                    const e = skuValues.ending?.[v]?.[key] || "";
-                    const o = skuValues.oos?.[v]?.[key] || "";
+                  if (isValidHarvest && o !== "") {
+                    completedSkuCount++;
+                  }
+                }
 
-                    if (
-                      b !== "" &&
-                      d !== "" &&
-                      r !== "" &&
-                      e !== "" &&
-                      o !== "" &&
-                      (v !== "ICECREAM" ||
-                        (skuValues.expiry?.[v]?.[key] || []).some(
-                          (entry: {
-                            date?: string;
-                            quantity?: string | number;
-                          }) =>
-                            !!entry?.date &&
-                            entry?.quantity !== "" &&
-                            !isNaN(Number(entry.quantity)) &&
-                            Number(entry.quantity) > 0
-                        ))
-                    ) {
-                      completedSkuCount++;
-                    }
+                if (v === "ICECREAM") {
+                  const b = skuValues.beginning?.[v]?.[key] || "";
+                  const d = skuValues.delivery?.[v]?.[key] || "";
+                  const e = skuValues.ending?.[v]?.[key] || "";
+
+                  if (b !== "" && d !== "" && e !== "") {
+                    completedSkuCount++;
+                  }
+                }
+
+                if (v === "DAIRY") {
+                  const b = skuValues.beginning?.[v]?.[key] || "";
+                  const d = skuValues.delivery?.[v]?.[key] || "";
+                  const e = skuValues.ending?.[v]?.[key] || "";
+
+                  if (b !== "" && d !== "" && e !== "") {
+                    completedSkuCount++;
                   }
                 }
               });
 
-              const isCompleted = completedSkuCount === totalSkuCount;
+              const isMvpOnlyBranch = mvpOnlyBranches.includes(selectedOutlet);
 
-              const isDisabled =
-                (index === 1 && // DAIRY requires ICECREAM to be completed
-                  !(
-                    skuData["DAIRY"]?.length &&
-                    skuData["DAIRY"].every((sku) => {
-                      const key = sku.value;
-                      const avail = availability["DAIRY"]?.[key];
-                      const b = skuValues.beginning?.["DAIRY"]?.[key] || "";
-                      const d = skuValues.delivery?.["DAIRY"]?.[key] || "";
-                      const r = skuValues.rtv?.["DAIRY"]?.[key] || "";
-                      const e = skuValues.ending?.["DAIRY"]?.[key] || "";
-                      const o = skuValues.oos?.["DAIRY"]?.[key] || "";
-                      return (
-                        avail === "Not Carried" ||
-                        avail === "Delisted" ||
-                        (b !== "" &&
-                          d !== "" &&
-                          r !== "" &&
-                          e !== "" &&
-                          o !== "")
-                      );
-                    })
-                  )) ||
-                (index === 2 && // MVP requires DAIRY to be completed
-                  !(
-                    skuData["ICECREAM"]?.length &&
-                    skuData["ICECREAM"].every((sku) => {
-                      const key = sku.value;
-                      const avail = availability["ICECREAM"]?.[key];
-                      const b = skuValues.beginning?.["ICECREAM"]?.[key] || "";
-                      const d = skuValues.delivery?.["ICECREAM"]?.[key] || "";
-                      const r = skuValues.rtv?.["ICECREAM"]?.[key] || "";
-                      const e = skuValues.ending?.["ICECREAM"]?.[key] || "";
-                      const o = skuValues.oos?.["ICECREAM"]?.[key] || "";
+              let isDisabled;
+              if (isMvpOnlyBranch) {
+                isDisabled = v !== "MVP";
+              } else {
+                isDisabled =
+                  (index === 1 &&
+                    !(
+                      skuData["DAIRY"]?.length &&
+                      skuData["DAIRY"].every((sku) => {
+                        const key = sku.value;
+                        const avail = availability["DAIRY"]?.[key];
+                        const b = skuValues.beginning?.["DAIRY"]?.[key] || "";
+                        const d = skuValues.delivery?.["DAIRY"]?.[key] || "";
+                        const e = skuValues.ending?.["DAIRY"]?.[key] || "";
 
-                      return (
-                        avail === "Not Carried" ||
-                        avail === "Delisted" ||
-                        (b !== "" &&
-                          d !== "" &&
-                          r !== "" &&
-                          e !== "" &&
-                          o !== "")
-                      );
-                    })
-                  ));
+                        return (
+                          avail === "Not Carried" ||
+                          avail === "Delisted" ||
+                          (b !== "" && d !== "" && e !== "")
+                        );
+                      })
+                    )) ||
+                  (index === 2 &&
+                    !(
+                      skuData["ICECREAM"]?.length &&
+                      skuData["ICECREAM"].every((sku) => {
+                        const key = sku.value;
+                        const avail = availability["ICECREAM"]?.[key];
+                        const b =
+                          skuValues.beginning?.["ICECREAM"]?.[key] || "";
+                        const d = skuValues.delivery?.["ICECREAM"]?.[key] || "";
+                        const e = skuValues.ending?.["ICECREAM"]?.[key] || "";
+
+                        return (
+                          avail === "Not Carried" ||
+                          avail === "Delisted" ||
+                          (b !== "" && d !== "" && e !== "")
+                        );
+                      })
+                    ));
+              }
 
               return (
                 <TouchableOpacity
@@ -1307,11 +1335,9 @@ const InventoryProcess = () => {
                   ]}
                   onPress={() => {
                     if (isDisabled) return;
-                    setVersion((prev) => (prev === v ? "" : v));
-                    setSku("");
-                    setExpandedSection(null);
+                    setShowCarryPrompt(v); // Always open carry prompt when switching
                   }}
-                  disabled={(version !== "" && version !== v) || isDisabled}
+                  disabled={isDisabled}
                 >
                   <Text
                     style={[
@@ -1325,6 +1351,69 @@ const InventoryProcess = () => {
                 </TouchableOpacity>
               );
             })}
+
+            {/* Carry Prompt Modal/Inline */}
+            {showCarryPrompt && (
+              <Modal
+                visible={!!showCarryPrompt}
+                transparent={true}
+                animationType="fade"
+                onRequestClose={() => setShowCarryPrompt(null)}
+              >
+                <View style={styles.modalOverlay}>
+                  <View style={styles.modalContainerCategory}>
+                    <Text style={styles.modalTitle}>
+                      Is this category carried?
+                    </Text>
+
+                    <View style={{ marginVertical: 10 }}>
+                      <Button
+                        title="Carried"
+                        color="#844515"
+                        onPress={() => {
+                          const versionSkus = skuData[showCarryPrompt] || [];
+                          const updatedAvailability = { ...availability };
+                          versionSkus.forEach((skuItem) => {
+                            const key = skuItem.value;
+                            updatedAvailability[showCarryPrompt] = {
+                              ...updatedAvailability[showCarryPrompt],
+                              [key]: "Carried",
+                            };
+                          });
+                          setAvailability(updatedAvailability);
+                          setShowCarryPrompt(null);
+                          setVersion(showCarryPrompt);
+                          setSku("");
+                          setExpandedSection(null);
+                          openCategoryForm(showCarryPrompt);
+                        }}
+                      />
+
+                      {/* Gap between buttons */}
+                      <View style={{ height: 10 }} />
+
+                      <Button
+                        title="Not Carried"
+                        color="#490000"
+                        onPress={() => {
+                          const versionSkus = skuData[showCarryPrompt] || [];
+                          const updatedAvailability = { ...availability };
+                          versionSkus.forEach((skuItem) => {
+                            const key = skuItem.value;
+                            updatedAvailability[showCarryPrompt] = {
+                              ...updatedAvailability[showCarryPrompt],
+                              [key]: "Not Carried",
+                            };
+                          });
+                          setAvailability(updatedAvailability);
+                          setShowCarryPrompt(null);
+                        }}
+                      />
+                    </View>
+                  </View>
+                </View>
+              </Modal>
+            )}
           </View>
 
           {version === "MVP" && (
@@ -1442,7 +1531,7 @@ const InventoryProcess = () => {
                                       ? "#fff"
                                       : "#f0f0f0",
                                     borderColor: entry.date
-                                      ? "#2c1c5c"
+                                      ? "#844515"
                                       : "#ccc",
                                     borderWidth: 1,
                                   },
@@ -1478,7 +1567,9 @@ const InventoryProcess = () => {
               <TouchableOpacity
                 style={[styles.expandButton, { marginTop: 20 }]}
                 onPress={() =>
-                  setExpandedSection((prev) => (prev === "OOS" ? null : "OOS"))
+                  setExpandedSection((prev) =>
+                    prev === "No. of Days OOS" ? null : "No. of Days OOS"
+                  )
                 }
               >
                 <Text style={styles.expandButtonText}>
@@ -1492,14 +1583,14 @@ const InventoryProcess = () => {
                       }
                     ).length;
                     const totalSkuCount = (skuData[version] || []).length;
-                    return expandedSection === "OOS"
-                      ? `Hide OOS ${filledCount}/${totalSkuCount}`
-                      : `Expand OOS ${filledCount}/${totalSkuCount}`;
+                    return expandedSection === "No. of Days OOS"
+                      ? `Hide No. of Days OOS ${filledCount}/${totalSkuCount}`
+                      : `Expand No. of Days OOS ${filledCount}/${totalSkuCount}`;
                   })()}
                 </Text>
               </TouchableOpacity>
 
-              {expandedSection === "OOS" && (
+              {expandedSection === "No. of Days OOS" && (
                 <View style={{ marginTop: 10 }}>
                   {skuData[version]?.map((skuItem) => (
                     <View key={skuItem.value} style={styles.skuItemRow}>
@@ -1512,7 +1603,7 @@ const InventoryProcess = () => {
                           styles.inputBox,
                           {
                             backgroundColor: "#fff",
-                            borderColor: "#2c1c5c",
+                            borderColor: "#844515",
                             borderWidth: 1,
                             height: 40,
                             fontSize: 14,
@@ -1539,8 +1630,71 @@ const InventoryProcess = () => {
 
           {version !== "MVP" && (
             <View>
-              {["Beginning", "Delivery", "RTV"].map((section) => {
+              {["Beginning", "Delivery", "RTV No.", "RTV"].map((section) => {
                 const sectionKey = section.toLowerCase();
+
+                if (section === "RTV No.") {
+                  return (
+                    <View key={section} style={{ marginVertical: 10 }}>
+                      <TouchableOpacity
+                        style={styles.expandButton}
+                        onPress={() =>
+                          setExpandedSection((prev) =>
+                            prev === section ? null : section
+                          )
+                        }
+                      >
+                        <Text style={styles.expandButtonText}>
+                          {expandedSection === section
+                            ? `Hide ${section}`
+                            : `Expand ${section}`}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {expandedSection === section && (
+                        <View
+                          style={{
+                            marginTop: 10,
+                            flexDirection: "row",
+                            alignItems: "center",
+                          }}
+                        >
+                          {/* Left Label */}
+                          <Text style={{ flex: 1, fontSize: 11 }}>
+                            RTV NUMBER
+                          </Text>
+
+                          {/* Right Input */}
+                          <TextInput
+                            style={[
+                              styles.inputBox,
+                              {
+                                flex: 1,
+                                height: 40,
+                                textAlign: "center",
+                                borderColor: "#844515",
+                                borderWidth: 1,
+                                backgroundColor: "#FFFFFF",
+                              },
+                            ]}
+                            placeholder="Enter RTV Number"
+                            value={skuValues.rtvNo?.[version] || ""}
+                            onChangeText={(text) => {
+                              setSkuValues((prev: any) => ({
+                                ...prev,
+                                rtvNo: {
+                                  ...(prev.rtvNo || {}),
+                                  [version]: text,
+                                },
+                              }));
+                            }}
+                          />
+                        </View>
+                      )}
+                    </View>
+                  );
+                }
+
                 const filledCount = filteredSkuOptions.filter((skuItem) => {
                   const skuKey = skuItem.value;
                   const val = skuValues[sectionKey]?.[version]?.[skuKey];
@@ -1560,12 +1714,26 @@ const InventoryProcess = () => {
                 return (
                   <View key={section} style={{ marginVertical: 10 }}>
                     <TouchableOpacity
-                      style={styles.expandButton}
-                      onPress={() =>
-                        setExpandedSection((prev) =>
-                          prev === section ? null : section
+                      style={[
+                        styles.expandButton,
+                        sectionKey === "rtv" &&
+                          !Object.values(
+                            skuValues?.rtvNo?.[version] || {}
+                          ).some((val) => !!val) && {
+                            opacity: 0.5, // visually indicate disabled
+                          },
+                      ]}
+                      disabled={
+                        sectionKey === "rtv" &&
+                        !Object.values(skuValues?.rtvNo?.[version] || {}).some(
+                          (val) => !!val
                         )
                       }
+                      onPress={() => {
+                        setExpandedSection((prev) =>
+                          prev === section ? null : section
+                        );
+                      }}
                     >
                       <Text style={styles.expandButtonText}>
                         {expandedSection === section
@@ -1573,23 +1741,32 @@ const InventoryProcess = () => {
                           : `Expand ${section} ${filledCount}/${totalSkuCount}`}
                       </Text>
                     </TouchableOpacity>
+
                     {expandedSection === section && (
                       <View style={{ marginTop: 10 }}>
                         {filteredSkuOptions.map((skuItem) => {
                           const skuKey = skuItem.value;
                           const isBeginning = sectionKey === "beginning";
+                          const isRTV = sectionKey === "rtv";
 
                           const availabilityValue =
                             availability[version]?.[skuKey] ??
-                            (isBeginning ? "Carried" : "");
+                            (isBeginning || isRTV ? "Carried" : "");
 
                           const isBeginningEditable =
                             isBeginning && availabilityValue === "Carried";
                           const isOtherSectionEditable =
                             !isBeginning &&
+                            !isRTV &&
                             availability[version]?.[skuKey] === "Carried";
+
+                          // Extra checks for RTV
+                          const hasRTVReason = !!rtvReason?.[version]?.[skuKey];
+
                           const isEditable = isBeginning
                             ? isBeginningEditable
+                            : isRTV
+                            ? availabilityValue === "Carried" && hasRTVReason
                             : isOtherSectionEditable;
 
                           return (
@@ -1615,123 +1792,250 @@ const InventoryProcess = () => {
                               </ScrollView>
 
                               {/* Availability Picker (Beginning only) */}
-                              {isBeginning && (
+                              {(isBeginning || isRTV) && (
                                 <View
                                   style={{
-                                    flex: 0.5,
+                                    flex: isBeginning || isRTV ? 0.5 : 1,
                                     marginHorizontal: 2,
                                     borderWidth: 1,
                                     borderColor: "#ccc",
                                     borderRadius: 4,
                                     overflow: "hidden",
-                                    minWidth: 20,
+                                    minWidth: isBeginning || isRTV ? 80 : 80,
+                                    height: 50,
                                   }}
                                 >
-                                  <Picker
-                                    selectedValue={availabilityValue}
-                                    style={{
-                                      height: 50,
-                                      width: "100%",
-                                      backgroundColor: "white",
-                                    }}
-                                    itemStyle={{
-                                      fontSize: 11, // Adjust this value as needed
-                                    }}
-                                    onValueChange={(value) => {
-                                      setAvailability((prev) => ({
-                                        ...prev,
-                                        [version]: {
-                                          ...(prev[version] || {}),
-                                          [skuKey]: value,
-                                        },
-                                      }));
+                                  {isBeginning ? (
+                                    <>
+                                      <Picker
+                                        selectedValue={availabilityValue}
+                                        style={{
+                                          height: 50,
+                                          width: "100%",
+                                          backgroundColor: "white",
+                                        }}
+                                        itemStyle={{
+                                          fontSize: 11,
+                                        }}
+                                        onValueChange={(value) => {
+                                          setAvailability((prev) => ({
+                                            ...prev,
+                                            [version]: {
+                                              ...(prev[version] || {}),
+                                              [skuKey]: value,
+                                            },
+                                          }));
 
-                                      if (value !== "Carried") {
-                                        // Clear all fields if Not Carried or Delisted
-                                        setSkuValues((prev: any) => ({
-                                          ...prev,
-                                          beginning: {
-                                            ...(prev.beginning || {}),
+                                          if (value !== "Carried") {
+                                            setSkuValues((prev: any) => ({
+                                              ...prev,
+                                              beginning: {
+                                                ...(prev.beginning || {}),
+                                                [version]: {
+                                                  ...(prev.beginning?.[
+                                                    version
+                                                  ] || {}),
+                                                  [skuKey]: "",
+                                                },
+                                              },
+                                              delivery: {
+                                                ...(prev.delivery || {}),
+                                                [version]: {
+                                                  ...(prev.delivery?.[
+                                                    version
+                                                  ] || {}),
+                                                  [skuKey]: "",
+                                                },
+                                              },
+                                              ending: {
+                                                ...(prev.ending || {}),
+                                                [version]: {
+                                                  ...(prev.ending?.[version] ||
+                                                    {}),
+                                                  [skuKey]: "",
+                                                },
+                                              },
+                                              oos: {
+                                                ...(prev.oos || {}),
+                                                [version]: {
+                                                  ...(prev.oos?.[version] ||
+                                                    {}),
+                                                  [skuKey]: "",
+                                                },
+                                              },
+                                            }));
+                                          }
+                                        }}
+                                        mode="dropdown"
+                                      >
+                                        <Picker.Item
+                                          label="Carried"
+                                          value="Carried"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Not Carried"
+                                          value="Not Carried"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                      </Picker>
+                                      <Icon
+                                        name="arrow-drop-down"
+                                        size={24}
+                                        color="grey"
+                                        style={{
+                                          position: "absolute",
+                                          right: 10,
+                                          top: 13,
+                                          pointerEvents: "none",
+                                        }}
+                                      />
+                                    </>
+                                  ) : isRTV ? (
+                                    <>
+                                      <Picker
+                                        selectedValue={
+                                          rtvReason[version]?.[skuKey] || ""
+                                        }
+                                        style={{
+                                          height: 50,
+                                          width: "100%",
+                                          backgroundColor: "white",
+                                        }}
+                                        itemStyle={{
+                                          fontSize: 11,
+                                        }}
+                                        onValueChange={(value) => {
+                                          setRtvReason((prev) => ({
+                                            ...prev,
                                             [version]: {
-                                              ...(prev.beginning?.[version] ||
-                                                {}),
-                                              [skuKey]: "",
+                                              ...(prev[version] || {}),
+                                              [skuKey]: value,
                                             },
-                                          },
-                                          delivery: {
-                                            ...(prev.delivery || {}),
-                                            [version]: {
-                                              ...(prev.delivery?.[version] ||
-                                                {}),
-                                              [skuKey]: "",
+                                          }));
+
+                                          setSkuValues((prev: any) => ({
+                                            ...prev,
+                                            rtvReason: {
+                                              ...(prev.rtvReason || {}),
+                                              [version]: {
+                                                ...(prev.rtvReason?.[version] ||
+                                                  {}),
+                                                [skuKey]: value,
+                                              },
                                             },
-                                          },
-                                          ending: {
-                                            ...(prev.ending || {}),
-                                            [version]: {
-                                              ...(prev.ending?.[version] || {}),
-                                              [skuKey]: "",
-                                            },
-                                          },
-                                          oos: {
-                                            ...(prev.oos || {}),
-                                            [version]: {
-                                              ...(prev.oos?.[version] || {}),
-                                              [skuKey]: "",
-                                            },
-                                          },
-                                        }));
-                                      }
-                                    }}
-                                    mode="dropdown"
-                                  >
-                                    <Picker.Item
-                                      label="Carried"
-                                      value="Carried"
-                                      style={{ fontSize: 11, color: "black" }}
-                                    />
-                                    <Picker.Item
-                                      label="Not Carried"
-                                      value="Not Carried"
-                                      style={{ fontSize: 11, color: "black" }}
-                                    />
-                                    {/* <Picker.Item
-                                      label="Delisted"
-                                      value="Delisted"
-                                      style={{ fontSize: 11, color: "black" }}
-                                    /> */}
-                                  </Picker>
-                                  <Icon
-                                    name="arrow-drop-down"
-                                    size={24}
-                                    color="grey"
-                                    style={{
-                                      position: "absolute",
-                                      right: 10,
-                                      top: 13,
-                                      pointerEvents: "none", // ensures Picker underneath still responds
-                                    }}
-                                  />
+                                          }));
+
+                                          if (value === "") {
+                                            setSkuValues((prev: any) => ({
+                                              ...prev,
+                                              rtv: {
+                                                ...(prev.rtv || {}),
+                                                [version]: {
+                                                  ...(prev.rtv?.[version] ||
+                                                    {}),
+                                                  [skuKey]: "",
+                                                },
+                                              },
+                                            }));
+                                          }
+                                        }}
+                                        mode="dropdown"
+                                      >
+                                        <Picker.Item
+                                          label="Select Reason"
+                                          value=""
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Damaged"
+                                          value="Damaged"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Near Expiry"
+                                          value="Near Expiry"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Expired"
+                                          value="Expired"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Discoloration"
+                                          value="Discoloration"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Voluntary Pullout"
+                                          value="Voluntary Pullout"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Delivered Near Expiry"
+                                          value="Delivered Near Expiry"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                      </Picker>
+                                      <Icon
+                                        name="arrow-drop-down"
+                                        size={24}
+                                        color="grey"
+                                        style={{
+                                          position: "absolute",
+                                          right: 10,
+                                          top: 13,
+                                          pointerEvents: "none",
+                                        }}
+                                      />
+                                    </>
+                                  ) : null}
                                 </View>
                               )}
 
-                              {/* Quantity Input (editable only if Carried) */}
+                              {/* Quantity Input (editable only if Carried or RTV reason is selected) */}
                               <TextInput
                                 style={[
                                   styles.inputBox,
                                   {
                                     width: 52,
                                     height: 40,
-                                    marginLeft: isBeginning ? 0 : 6,
+                                    marginLeft: isBeginning || isRTV ? 0 : 6,
                                     textAlign: "center",
-                                    backgroundColor:
-                                      availabilityValue === "Carried"
-                                        ? "#FFFFFF"
-                                        : "#f0f0f0",
-                                    borderColor:
-                                      availabilityValue === "Carried"
-                                        ? "#2c1c5c"
-                                        : "#ccc",
+                                    backgroundColor: isEditable
+                                      ? "#FFFFFF"
+                                      : "#f0f0f0",
+                                    borderColor: isEditable
+                                      ? "#844515"
+                                      : "#ccc",
                                     borderWidth: 1,
                                   },
                                 ]}
@@ -1767,7 +2071,9 @@ const InventoryProcess = () => {
               })}
 
               {/* Expandable Ending Section with count */}
-              {version !== "MVP" &&
+              {(version === "MVP" ||
+                version === "ICECREAM" ||
+                version === "DAIRY") &&
                 (() => {
                   const section = "Ending";
                   const sectionKey = "ending";
@@ -1833,7 +2139,7 @@ const InventoryProcess = () => {
                                           : "#f0f0f0",
                                       borderColor:
                                         availabilityValue === "Carried"
-                                          ? "#2c1c5c"
+                                          ? "#844515"
                                           : "#ccc",
                                       borderWidth: 1,
                                     },
@@ -1889,19 +2195,32 @@ const InventoryProcess = () => {
                     activeOpacity={1}
                     onPress={() => {}}
                   >
-                    {filteredSkuOptions.map((skuItem) => (
-                      <View key={skuItem.value} style={styles.skuItemRow}>
-                        <Text style={styles.skuText}>{skuItem.label}</Text>
-                        <TextInput
-                          placeholder="Offtake"
-                          style={styles.inputBox}
-                          editable={false}
-                          value={
-                            skuValues.offtake?.[version]?.[skuItem.value] || ""
-                          }
-                        />
-                      </View>
-                    ))}
+                    {filteredSkuOptions.map((skuItem) => {
+                      const value = Number(
+                        skuValues.offtake?.[version]?.[skuItem.value] || 0
+                      );
+
+                      const isNegative = value < 0;
+
+                      return (
+                        <View key={skuItem.value} style={styles.skuItemRow}>
+                          <Text style={styles.skuText}>{skuItem.label}</Text>
+                          <TextInput
+                            placeholder="Offtake"
+                            style={[
+                              styles.inputBox,
+                              isNegative && {
+                                borderColor: "red",
+                                borderWidth: 2,
+                                color: "red",
+                              },
+                            ]}
+                            editable={false}
+                            value={value === 0 ? "" : String(value)}
+                          />
+                        </View>
+                      );
+                    })}
                   </TouchableOpacity>
                 )}
               </View>
@@ -1909,7 +2228,7 @@ const InventoryProcess = () => {
               <View style={{ marginVertical: 10 }}>
                 {/* OOS Section */}
                 {(() => {
-                  const section = "OOS";
+                  const section = "No. of Days OOS";
                   const sectionKey = "oos";
 
                   const filledCount = (skuData[version] || []).filter(
@@ -1940,8 +2259,8 @@ const InventoryProcess = () => {
                       >
                         <Text style={styles.expandButtonText}>
                           {expandedSection === section
-                            ? `Hide OOS ${filledCount}/${totalSkuCount}`
-                            : `Expand OOS ${filledCount}/${totalSkuCount}`}
+                            ? `Hide No. of Days OOS ${filledCount}/${totalSkuCount}`
+                            : `Expand No. of Days OOS ${filledCount}/${totalSkuCount}`}
                         </Text>
                       </TouchableOpacity>
 
@@ -1973,7 +2292,7 @@ const InventoryProcess = () => {
                                           : "#f0f0f0",
                                       borderColor:
                                         availabilityValue === "Carried"
-                                          ? "#2c1c5c"
+                                          ? "#844515"
                                           : "#ccc",
                                       borderWidth: 1,
                                       height: 40,
@@ -2014,256 +2333,300 @@ const InventoryProcess = () => {
                   );
                 })()}
               </View>
-              {version === "ICECREAM" && (
-                <View style={{ marginVertical: 10 }}>
-                  {(() => {
-                    const section = "Expiry";
-                    const sectionKey = "expiry";
 
-                    const filledCount = (skuData[version] || []).filter(
-                      (skuItem) => {
-                        const skuKey = skuItem.value;
-                        const entries =
-                          skuValues[sectionKey]?.[version]?.[skuKey] || [];
-                        return entries.some(
+              <View style={{ marginVertical: 10 }}>
+                {(() => {
+                  const section = "Expiry";
+                  const sectionKey = "expiry";
+
+                  const filledCount = (skuData[version] || []).filter(
+                    (skuItem) => {
+                      const skuKey = skuItem.value;
+                      const entries =
+                        skuValues[sectionKey]?.[version]?.[skuKey] || [];
+                      const availStatus = availability[version]?.[skuKey];
+
+                      return (
+                        entries.some(
                           (entry: {
                             date: string;
                             quantity: string | number;
                           }) => entry.date && entry.quantity
-                        );
-                      }
-                    ).length;
+                        ) ||
+                        availStatus === "Not Carried" ||
+                        availStatus === "Delisted"
+                      );
+                    }
+                  ).length;
 
-                    const totalSkuCount = (skuData[version] || []).length;
+                  const totalSkuCount = (skuData[version] || []).length;
 
-                    return (
-                      <>
-                        <TouchableOpacity
-                          style={styles.expandButton}
-                          onPress={() =>
-                            setExpandedSection((prev) =>
-                              prev === section ? null : section
-                            )
-                          }
-                        >
-                          <Text style={styles.expandButtonText}>
-                            {expandedSection === section
-                              ? `Hide Expiry ${filledCount}/${totalSkuCount}`
-                              : `Expand Expiry ${filledCount}/${totalSkuCount}`}
-                          </Text>
-                        </TouchableOpacity>
+                  return (
+                    <>
+                      <TouchableOpacity
+                        style={styles.expandButton}
+                        onPress={() =>
+                          setExpandedSection((prev) =>
+                            prev === section ? null : section
+                          )
+                        }
+                      >
+                        <Text style={styles.expandButtonText}>
+                          {expandedSection === section
+                            ? `Hide Expiry ${filledCount}/${totalSkuCount}`
+                            : `Expand Expiry ${filledCount}/${totalSkuCount}`}
+                        </Text>
+                      </TouchableOpacity>
 
-                        {expandedSection === section && (
-                          <View style={{ marginTop: 10 }}>
-                            {skuData[version]?.map((skuItem) => {
-                              const ExpiryEntries =
-                                skuValues.expiry?.[version]?.[skuItem.value] ||
-                                [];
+                      {expandedSection === section && (
+                        <View style={{ marginTop: 10 }}>
+                          {skuData[version]?.map((skuItem) => {
+                            const skuKey = skuItem.value;
 
-                              if (ExpiryEntries.length === 0) {
-                                ExpiryEntries.push({ date: "", quantity: "" });
-                              }
+                            const availabilityValue =
+                              availability[version]?.[skuKey] || "Carried";
 
-                              return (
-                                <View
-                                  key={skuItem.value}
-                                  style={{ marginBottom: 16 }}
+                            let ExpiryEntries =
+                              skuValues.expiry?.[version]?.[skuKey] || [];
+
+                            if (
+                              availabilityValue === "Not Carried" ||
+                              availabilityValue === "Delisted"
+                            ) {
+                              // Clear expiry if SKU is not carried or delisted
+                              ExpiryEntries = [{ date: "", quantity: "" }];
+
+                              // Optionally, update the state to reflect this clearing
+                              skuValues.expiry[version][skuKey] = ExpiryEntries;
+                            } else if (ExpiryEntries.length === 0) {
+                              ExpiryEntries.push({ date: "", quantity: "" });
+                            }
+
+                            return (
+                              <View
+                                key={skuItem.value}
+                                style={{ marginBottom: 16 }}
+                              >
+                                <Text
+                                  style={[styles.skuText, { marginBottom: 6 }]}
                                 >
-                                  <Text
-                                    style={[
-                                      styles.skuText,
-                                      { marginBottom: 6 },
-                                    ]}
-                                  >
-                                    {skuItem.label}
-                                  </Text>
+                                  {skuItem.label}
+                                </Text>
 
-                                  {ExpiryEntries.map(
-                                    (
-                                      entry: {
-                                        date: string;
-                                        quantity: string | number;
-                                      },
-                                      index: number
-                                    ) => (
+                                {ExpiryEntries.map(
+                                  (
+                                    entry: {
+                                      date: string;
+                                      quantity: string | number;
+                                    },
+                                    index: number
+                                  ) => (
+                                    <View
+                                      key={`${skuItem.value}-${index}`}
+                                      style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        marginBottom: 8,
+                                      }}
+                                    >
+                                      {/* Date Picker */}
                                       <View
-                                        key={`${skuItem.value}-${index}`}
                                         style={{
-                                          flexDirection: "row",
-                                          alignItems: "center",
-                                          marginBottom: 8,
+                                          flex: 3,
+                                          marginHorizontal: 8,
                                         }}
                                       >
-                                        {/* Date Picker */}
-                                        <View
+                                        <TouchableOpacity
                                           style={{
-                                            flex: 3,
-                                            marginHorizontal: 8,
+                                            borderWidth: 1,
+                                            borderColor:
+                                              availabilityValue === "Carried"
+                                                ? "#844515"
+                                                : "#ccc",
+                                            borderRadius: 4,
+                                            paddingVertical: 10,
+                                            paddingHorizontal: 12,
+                                            backgroundColor:
+                                              availabilityValue === "Carried"
+                                                ? "#fff"
+                                                : "#f0f0f0",
                                           }}
-                                        >
-                                          <TouchableOpacity
-                                            style={{
-                                              borderWidth: 1,
-                                              borderColor: "#ccc",
-                                              borderRadius: 4,
-                                              paddingVertical: 10,
-                                              paddingHorizontal: 12,
-                                            }}
-                                            onPress={() => {
+                                          onPress={() => {
+                                            if (
+                                              availabilityValue === "Carried"
+                                            ) {
                                               setShowDatePicker({
                                                 skuKey: skuItem.value,
                                                 index,
                                               });
-                                            }}
-                                          >
-                                            <Text style={{ fontSize: 14 }}>
-                                              {entry.date
-                                                ? new Date(
-                                                    entry.date
-                                                  ).toLocaleDateString("en-PH")
-                                                : "Select Date"}
-                                            </Text>
-                                          </TouchableOpacity>
-
-                                          {showDatePicker?.skuKey ===
-                                            skuItem.value &&
-                                            showDatePicker?.index === index && (
-                                              <DateTimePicker
-                                                value={
-                                                  entry.date
-                                                    ? new Date(entry.date)
-                                                    : new Date()
-                                                }
-                                                mode="date"
-                                                display="default"
-                                                onChange={(
-                                                  event,
-                                                  selectedDate
-                                                ) => {
-                                                  if (
-                                                    event.type === "set" &&
-                                                    selectedDate
-                                                  ) {
-                                                    handleExpiryEntryChange(
-                                                      skuItem.value,
-                                                      index,
-                                                      "date",
-                                                      selectedDate.toISOString()
-                                                    );
-                                                  }
-                                                  setShowDatePicker(null);
-                                                }}
-                                              />
-                                            )}
-                                        </View>
-
-                                        {/* Quantity Input */}
-                                        <TextInput
-                                          placeholder="Qty"
-                                          placeholderTextColor={"grey"}
-                                          style={[
-                                            styles.inputBox,
-                                            {
-                                              flex: 2,
-                                              height: 40,
-                                              fontSize: 14,
-                                              backgroundColor: entry.date
-                                                ? "#fff"
-                                                : "#f0f0f0",
-                                              borderColor: entry.date
-                                                ? "#2c1c5c"
-                                                : "#ccc",
-                                              borderWidth: 1,
-                                            },
-                                          ]}
-                                          keyboardType="numeric"
-                                          value={
-                                            entry.quantity?.toString() || ""
-                                          }
-                                          onChangeText={(text) => {
-                                            if (!entry.date) {
-                                              Alert.alert(
-                                                "Please select a date first."
-                                              );
-                                              return;
-                                            }
-
-                                            if (/^\d*$/.test(text)) {
-                                              handleExpiryEntryChange(
-                                                skuItem.value,
-                                                index,
-                                                "quantity",
-                                                text
-                                              );
                                             }
                                           }}
-                                        />
-                                      </View>
-                                    )
-                                  )}
+                                          disabled={
+                                            availabilityValue !== "Carried"
+                                          } // Disable if not carried
+                                        >
+                                          <Text
+                                            style={{
+                                              fontSize: 14,
+                                              color:
+                                                availabilityValue === "Carried"
+                                                  ? "#000"
+                                                  : "#888",
+                                            }}
+                                          >
+                                            {entry.date
+                                              ? new Date(
+                                                  entry.date
+                                                ).toLocaleDateString("en-PH")
+                                              : "Select Date"}
+                                          </Text>
+                                        </TouchableOpacity>
 
-                                  {/* ➕ Add / 🗑️ Delete Row */}
-                                  <View
+                                        {showDatePicker?.skuKey ===
+                                          skuItem.value &&
+                                          showDatePicker?.index === index &&
+                                          availabilityValue === "Carried" && (
+                                            <DateTimePicker
+                                              value={
+                                                entry.date
+                                                  ? new Date(entry.date)
+                                                  : new Date()
+                                              }
+                                              mode="date"
+                                              display="default"
+                                              onChange={(
+                                                event,
+                                                selectedDate
+                                              ) => {
+                                                if (
+                                                  event.type === "set" &&
+                                                  selectedDate
+                                                ) {
+                                                  handleExpiryEntryChange(
+                                                    skuItem.value,
+                                                    index,
+                                                    "date",
+                                                    selectedDate.toISOString()
+                                                  );
+                                                }
+                                                setShowDatePicker(null);
+                                              }}
+                                            />
+                                          )}
+                                      </View>
+
+                                      {/* Quantity Input */}
+                                      <TextInput
+                                        placeholder="Qty"
+                                        placeholderTextColor={"grey"}
+                                        editable={
+                                          availabilityValue === "Carried"
+                                        } // Disable input if not carried
+                                        style={[
+                                          styles.inputBox,
+                                          {
+                                            backgroundColor:
+                                              availabilityValue === "Carried"
+                                                ? "#fff"
+                                                : "#f0f0f0",
+                                            borderColor:
+                                              availabilityValue === "Carried"
+                                                ? "#844515"
+                                                : "#ccc",
+                                            borderWidth: 1,
+                                            height: 40,
+                                            fontSize: 14,
+                                            marginLeft: 10,
+                                            color:
+                                              availabilityValue === "Carried"
+                                                ? "#000"
+                                                : "#888",
+                                          },
+                                        ]}
+                                        keyboardType="numeric"
+                                        value={entry.quantity?.toString() || ""}
+                                        onChangeText={(text) => {
+                                          if (!entry.date) {
+                                            Alert.alert(
+                                              "Please select a date first."
+                                            );
+                                            return;
+                                          }
+
+                                          if (/^\d*$/.test(text)) {
+                                            handleExpiryEntryChange(
+                                              skuItem.value,
+                                              index,
+                                              "quantity",
+                                              text
+                                            );
+                                          }
+                                        }}
+                                      />
+                                    </View>
+                                  )
+                                )}
+
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    marginTop: 4,
+                                    paddingHorizontal: 4,
+                                  }}
+                                >
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      addExpiryEntry(skuItem.value)
+                                    }
                                     style={{
                                       flexDirection: "row",
-                                      justifyContent: "space-between",
                                       alignItems: "center",
-                                      marginTop: 4,
-                                      paddingHorizontal: 4,
                                     }}
                                   >
-                                    <TouchableOpacity
-                                      onPress={() =>
-                                        addExpiryEntry(skuItem.value)
-                                      }
+                                    <Text style={{ fontSize: 18 }}>➕</Text>
+                                    <Text
                                       style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
+                                        color: "#844515",
+                                        fontSize: 14,
+                                        marginLeft: 4,
                                       }}
                                     >
-                                      <Text style={{ fontSize: 18 }}>➕</Text>
-                                      <Text
-                                        style={{
-                                          color: "#2c1c5c",
-                                          fontSize: 14,
-                                          marginLeft: 4,
-                                        }}
-                                      >
-                                        Add Entry
-                                      </Text>
-                                    </TouchableOpacity>
+                                      Add Entry
+                                    </Text>
+                                  </TouchableOpacity>
 
-                                    <TouchableOpacity
-                                      onPress={() =>
-                                        deleteExpiryEntry(skuItem.value, 0)
-                                      }
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      deleteExpiryEntry(skuItem.value, 0)
+                                    }
+                                    style={{
+                                      flexDirection: "row",
+                                      alignItems: "center",
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 18 }}>🗑️</Text>
+                                    <Text
                                       style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
+                                        color: "crimson",
+                                        fontSize: 14,
+                                        marginLeft: 4,
                                       }}
                                     >
-                                      <Text style={{ fontSize: 18 }}>🗑️</Text>
-                                      <Text
-                                        style={{
-                                          color: "crimson",
-                                          fontSize: 14,
-                                          marginLeft: 4,
-                                        }}
-                                      >
-                                        Delete Entry
-                                      </Text>
-                                    </TouchableOpacity>
-                                  </View>
+                                      Delete Entry
+                                    </Text>
+                                  </TouchableOpacity>
                                 </View>
-                              );
-                            })}
-                          </View>
-                        )}
-                      </>
-                    );
-                  })()}
-                </View>
-              )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </>
+                  );
+                })()}
+              </View>
             </View>
           )}
 

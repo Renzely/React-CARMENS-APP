@@ -69,7 +69,7 @@
 //     try {
 //       setLoading(true);
 //       const response = await fetch(
-//         `https://api-carmens-best.bmphrc.com/expiry/history?email=${encodeURIComponent(
+//         `http://192.168.50.54:3001/expiry/history?email=${encodeURIComponent(
 //           email
 //         )}`
 //       );
