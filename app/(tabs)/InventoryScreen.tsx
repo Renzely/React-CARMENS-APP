@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
 import styles from "./Style";
 
 type ExpiryEntry = {
@@ -25,6 +26,7 @@ type RootStackParamList = {
   //   Navigator: undefined;
   //   Competitors: undefined;
   InventoryProcess: undefined;
+  InventoryNextWeek: { data: string };
 };
 
 type InventoryScreenNavigationProp = NativeStackNavigationProp<
@@ -220,6 +222,7 @@ const InventoryContent = () => {
 };
 
 const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
+  const navigation = useNavigation<InventoryScreenNavigationProp>();
   const [isOffline, setIsOffline] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const isLocked =
@@ -332,7 +335,9 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
               <Text style={styles.itemText}>
                 Delivery PCS: {sku.deliveryPCS}
               </Text>
+              <Text style={styles.itemText}>RTV No.: {sku.rtvNo}</Text>
               <Text style={styles.itemText}>RTV PCS: {sku.rtvPCS}</Text>
+              <Text style={styles.itemText}>RTV Reason: {sku.rtvReason}</Text>
               <Text style={styles.itemText}>Ending PCS: {sku.endingPCS}</Text>
               <Text style={styles.itemText}>Offtake: {sku.offtake}</Text>
 
@@ -418,70 +423,106 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
     </View>
   );
 
-  // const handleGoToNextWeek = () => {
-  //   try {
-  //     const getNextWeekInfo = (currentRange: string) => {
-  //       const [startStr] = currentRange.split("-");
-  //       const thisYear = moment().year();
-  //       const startDate = moment(`${startStr} ${thisYear}`, "MMMDD YYYY");
-  //       if (!startDate.isValid())
-  //         throw new Error(`Invalid start date: ${startStr} ${thisYear}`);
+  const moment = require("moment");
 
-  //       const nextStartDate = startDate.clone().add(7, "days");
-  //       const nextEndDate = nextStartDate.clone().add(6, "days");
+  function InventoryNextWeek(prevDoc: any) {
+    // Get next week's date range info
+    const getNextWeekInfo = (currentDate?: moment.MomentInput) => {
+      const today = currentDate ? moment(currentDate) : moment();
+      const startDate = today.clone();
+      const endDate = startDate.clone().add(6, "days");
 
-  //       const newStart = nextStartDate.format("MMMDD");
-  //       const newEnd = nextEndDate.format("MMMDD");
-  //       const newWeeksCovered = `${newStart}-${newEnd}`;
-  //       const newMonth = nextStartDate.format("MMMM");
+      const weeksCovered = `${startDate.format("MMMDD")}-${endDate.format(
+        "MMMDD"
+      )}`;
+      const month = startDate.format("MMMM");
 
-  //       const startOfYear = moment().startOf("year");
-  //       const firstFriday =
-  //         startOfYear.day() <= 5
-  //           ? startOfYear.clone().day(5)
-  //           : startOfYear.clone().add(1, "week").day(5);
-  //       const newWeekNumber = nextEndDate.diff(firstFriday, "weeks") + 1;
-  //       const newWeek = `Week ${newWeekNumber}`;
+      const startOfYear = moment().startOf("year");
+      const firstFriday =
+        startOfYear.day() <= 5
+          ? startOfYear.clone().day(5)
+          : startOfYear.clone().add(1, "week").day(5);
 
-  //       return { newWeeksCovered, newMonth, newWeek };
-  //     };
+      const weekNumber = endDate.diff(firstFriday, "weeks") + 1;
+      const week = `Week ${weekNumber}`;
 
-  //     const nextWeekInfo = getNextWeekInfo(weeksCovered);
+      return { weeksCovered, month, week, startDate };
+    };
 
-  //     const nextWeekData = {
-  //       date: moment().format("YYYY-MM-DD"),
-  //       email,
-  //       merchandiser,
-  //       outlet,
-  //       weeksCovered: nextWeekInfo.newWeeksCovered,
-  //       month: nextWeekInfo.newMonth,
-  //       week: nextWeekInfo.newWeek,
-  //       availability,
-  //       version,
-  //       skuValues: {
-  //         beginning: skuValues.ending,
-  //         delivery: {},
-  //         ending: {},
-  //         offtake: {},
-  //         inventoryDays: {},
-  //         expiry: skuValues.expiry,
-  //         quantity: skuValues.quantity,
-  //       },
-  //       previousWeekId: item._id,
-  //       isOffline: isOffline, // optional flag
-  //     };
+    const nextInfo = getNextWeekInfo(prevDoc.date);
 
-  //     router.push({
-  //       pathname: "/InventoryNextWeek",
-  //       params: {
-  //         data: JSON.stringify(nextWeekData),
-  //         previousWeekId: item._id,
-  //       },
-  //     });
-  //   } catch (error) {
-  //     Alert.alert("Navigation Error", (error as Error).message);
-  //   }
-  // };
+    // Helper to copy carried SKUs with beginning = previous ending
+    const carryOverSkus = (carried: any[] = [], prevUsage = 0) =>
+      (carried || []).map((sku: any) => {
+        const prevTotal = Number(sku.totalOfftake || 0);
+
+        return {
+          ...sku,
+          beginningPCS: sku.endingPCS || 0,
+          deliveryPCS: 0,
+          endingPCS: 0,
+          offtake: 0, // reset for new week
+          prevOfftake: Number(sku.offtake || 0),
+          totalOfftake: prevTotal, // ✅ don’t add prevOfftake again
+          // avgOfftake:
+          //   prevUsage > 0 ? Number((prevTotal / prevUsage).toFixed(2)) : 0,
+
+          soQty: 0,
+          suggestedOrder: 0,
+          inventoryDays: 0,
+          rtvNo: "",
+          rtvPCS: 0,
+          rtvReason: "",
+          expiry: sku.expiry || [],
+          harvest: sku.harvest || [],
+        };
+      });
+
+    const carryOverMVP = (mvp: any = { Carried: [] }) =>
+      (mvp.Carried || []).map((sku: any) => ({
+        ...sku,
+        harvest: sku.harvest?.length
+          ? sku.harvest.map((h: any) => ({ ...h }))
+          : [{ date: "", quantity: "" }],
+      }));
+
+    const versions = {
+      DAIRY: {
+        Carried: carryOverSkus(
+          prevDoc.versions?.DAIRY?.Carried,
+          prevDoc.usageCount || 0
+        ),
+        "Not Carried": prevDoc.versions?.DAIRY?.["Not Carried"] || [],
+        Delisted: prevDoc.versions?.DAIRY?.Delisted || [],
+      },
+      ICECREAM: {
+        Carried: carryOverSkus(
+          prevDoc.versions?.ICECREAM?.Carried,
+          prevDoc.usageCount || 0
+        ),
+        "Not Carried": prevDoc.versions?.ICECREAM?.["Not Carried"] || [],
+        Delisted: prevDoc.versions?.ICECREAM?.Delisted || [],
+      },
+      MVP: {
+        Carried: carryOverMVP(prevDoc.versions?.MVP),
+        "Not Carried": prevDoc.versions?.MVP?.["Not Carried"] || [],
+        Delisted: prevDoc.versions?.MVP?.Delisted || [],
+      },
+    };
+
+    return {
+      email: prevDoc.email,
+      merchandiser: prevDoc.merchandiser,
+      outlet: prevDoc.outlet, // auto fetched
+      date: nextInfo.startDate.format("YYYY-MM-DD"),
+      weeksCovered: nextInfo.weeksCovered,
+      month: nextInfo.month,
+      week: nextInfo.week,
+      versions,
+      locked: false,
+      usageCount: (prevDoc.usageCount || 0) + 1,
+    };
+  }
 
   return (
     <TouchableOpacity
@@ -509,21 +550,25 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
           </Text>
         </View>
 
-        {/* <TouchableOpacity
+        <TouchableOpacity
           style={{
-            backgroundColor: isLocked ? "#e0e0e0" : "#4caf50",
+            backgroundColor: isLocked ? "#e0e0e0" : "#844515",
             padding: 8,
             borderRadius: 20,
           }}
           onPress={() => {
             if (!isLocked) {
-              handleGoToNextWeek();
+              const nextDoc = InventoryNextWeek(item); // 🔥 process prevDoc first
+              console.log("Next doc before save:", nextDoc.usageCount);
+              navigation.navigate("InventoryNextWeek", {
+                data: JSON.stringify(nextDoc),
+              });
             }
           }}
           disabled={isLocked}
         >
           <Icon name="edit-document" size={20} color="#fff" />
-        </TouchableOpacity> */}
+        </TouchableOpacity>
       </View>
 
       {expanded && (
