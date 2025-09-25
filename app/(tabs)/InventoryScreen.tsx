@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialIcons";
+import { skuData } from "./skuData";
 import styles from "./Style";
 
 type ExpiryEntry = {
@@ -326,84 +327,77 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
 
       {status === "Carried" && (
         <View>
-          {/* ✅ For ICECREAM & DAIRY */}
-          {version !== "MVP" && (
-            <View>
-              <Text style={styles.itemText}>
-                Beginning PCS: {sku.beginningPCS}
-              </Text>
-              <Text style={styles.itemText}>
-                Delivery PCS: {sku.deliveryPCS}
-              </Text>
-              <Text style={styles.itemText}>RTV No.: {sku.rtvNo}</Text>
-              <Text style={styles.itemText}>RTV PCS: {sku.rtvPCS}</Text>
-              <Text style={styles.itemText}>RTV Reason: {sku.rtvReason}</Text>
-              <Text style={styles.itemText}>Ending PCS: {sku.endingPCS}</Text>
-              <Text style={styles.itemText}>Offtake: {sku.offtake}</Text>
+          {/* ✅ Common fields for ALL VERSIONS */}
+          <Text style={styles.itemText}>Beginning PCS: {sku.beginningPCS}</Text>
+          <Text style={styles.itemText}>Delivery PCS: {sku.deliveryPCS}</Text>
+          <Text style={styles.itemText}>RTV No.: {sku.rtvNo}</Text>
+          <Text style={styles.itemText}>RTV PCS: {sku.rtvPCS}</Text>
+          <Text style={styles.itemText}>RTV Reason: {sku.rtvReason}</Text>
+          <Text style={styles.itemText}>Adjust (+): {sku.adjustPlus}</Text>
+          <Text style={styles.itemText}>Adjust (−): {sku.adjustMinus}</Text>
+          <Text style={styles.itemText}>Ending PCS: {sku.endingPCS}</Text>
+          <Text style={styles.itemText}>Offtake: {sku.offtake}</Text>
+          <Text style={styles.itemText}>OOS: {sku.oos}</Text>
 
-              {/* ✅ Show OOS in history */}
-              <Text style={styles.itemText}>OOS: {sku.oos}</Text>
-
-              {/* ✅ Show Expiry if ICECREAM and has entries */}
-              {version === "ICECREAM" &&
-                Array.isArray(sku.expiry) &&
-                sku.expiry.length > 0 && (
-                  <View style={{ marginTop: 4 }}>
-                    <Text style={[styles.itemText, { fontWeight: "bold" }]}>
-                      Expiry Entries:
-                    </Text>
-                    {sku.expiry.map(
-                      (
-                        entry: { date?: string; quantity?: number },
-                        index: number
-                      ) =>
-                        entry?.date ? (
-                          <Text key={index} style={styles.itemText}>
-                            {new Date(entry.date).toLocaleDateString("en-PH", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            })}{" "}
-                            — Qty: {entry.quantity ?? 0}
-                          </Text>
-                        ) : null
-                    )}
-                  </View>
+          {/* ✅ Expiry only for DAIRY & ICECREAM */}
+          {(version === "DAIRY" || version === "ICECREAM") &&
+            Array.isArray(sku.expiry) &&
+            sku.expiry.length > 0 && (
+              <View style={{ marginTop: 4 }}>
+                <Text style={[styles.itemText, { fontWeight: "bold" }]}>
+                  Expiry Entries:
+                </Text>
+                {sku.expiry.map(
+                  (
+                    entry: { date?: string; quantity?: number },
+                    index: number
+                  ) =>
+                    entry?.date ? (
+                      <Text
+                        key={`${sku.skuCode}-expiry-${index}`}
+                        style={styles.itemText}
+                      >
+                        {new Date(entry.date).toLocaleDateString("en-PH", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}{" "}
+                        — Qty: {entry.quantity ?? 0}
+                      </Text>
+                    ) : null
                 )}
-            </View>
-          )}
+              </View>
+            )}
 
-          {/* ✅ For MVP (Harvest only using date) */}
-          {version === "MVP" && (
-            <>
-              {Array.isArray(sku.harvest) && sku.harvest.length > 0 && (
-                <View style={{ marginTop: 4 }}>
-                  <Text style={[styles.itemText, { fontWeight: "bold" }]}>
-                    Harvest Entries:
-                  </Text>
-                  {sku.harvest.map(
-                    (
-                      entry: { date?: string; quantity?: number },
-                      index: number
-                    ) =>
-                      entry?.date ? (
-                        <Text key={index} style={styles.itemText}>
-                          {new Date(entry.date).toLocaleDateString("en-PH", {
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          })}{" "}
-                          — Qty: {entry.quantity ?? 0}
-                        </Text>
-                      ) : null
-                  )}
-                </View>
-              )}
-
-              {/* ✅ Show OOS also for MVP */}
-              <Text style={styles.itemText}>OOS: {sku.oos}</Text>
-            </>
-          )}
+          {/* ✅ Harvest only for MVP */}
+          {version === "MVP" &&
+            Array.isArray(sku.harvest) &&
+            sku.harvest.length > 0 && (
+              <View style={{ marginTop: 4 }}>
+                <Text style={[styles.itemText, { fontWeight: "bold" }]}>
+                  Harvest Entries:
+                </Text>
+                {sku.harvest.map(
+                  (
+                    entry: { date?: string; quantity?: number },
+                    index: number
+                  ) =>
+                    entry?.date ? (
+                      <Text
+                        key={`${sku.skuCode}-harvest-${index}`}
+                        style={styles.itemText}
+                      >
+                        {new Date(entry.date).toLocaleDateString("en-PH", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}{" "}
+                        — Qty: {entry.quantity ?? 0}
+                      </Text>
+                    ) : null
+                )}
+              </View>
+            )}
         </View>
       )}
     </View>
@@ -426,7 +420,7 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
   const moment = require("moment");
 
   function InventoryNextWeek(prevDoc: any) {
-    // Get next week's date range info
+    // 🔹 Helper: compute next week info
     const getNextWeekInfo = (currentDate?: moment.MomentInput) => {
       const today = currentDate ? moment(currentDate) : moment();
       const startDate = today.clone();
@@ -451,22 +445,18 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
 
     const nextInfo = getNextWeekInfo(prevDoc.date);
 
-    // Helper to copy carried SKUs with beginning = previous ending
-    const carryOverSkus = (carried: any[] = [], prevUsage = 0) =>
+    // 🔹 Carry over any Carried SKUs
+    const carryOverSkus = (carried: any[] = []) =>
       (carried || []).map((sku: any) => {
         const prevTotal = Number(sku.totalOfftake || 0);
-
         return {
           ...sku,
           beginningPCS: sku.endingPCS || 0,
           deliveryPCS: 0,
-          endingPCS: 0,
-          offtake: 0, // reset for new week
+          endingPCS: Number(sku.endingPCS || 0),
+          offtake: 0,
           prevOfftake: Number(sku.offtake || 0),
-          totalOfftake: prevTotal, // ✅ don’t add prevOfftake again
-          // avgOfftake:
-          //   prevUsage > 0 ? Number((prevTotal / prevUsage).toFixed(2)) : 0,
-
+          totalOfftake: prevTotal,
           soQty: 0,
           suggestedOrder: 0,
           inventoryDays: 0,
@@ -474,53 +464,78 @@ const InventoryCard: React.FC<{ item: InventoryItem }> = ({ item }) => {
           rtvPCS: 0,
           rtvReason: "",
           expiry: sku.expiry || [],
-          harvest: sku.harvest || [],
+          harvest: sku.harvest || [], // ✅ keep harvest if MVP
         };
       });
 
-    const carryOverMVP = (mvp: any = { Carried: [] }) =>
-      (mvp.Carried || []).map((sku: any) => ({
-        ...sku,
-        harvest: sku.harvest?.length
-          ? sku.harvest.map((h: any) => ({ ...h }))
-          : [{ date: "", quantity: "" }],
-      }));
+    // 🔹 General buildVersion (works for DAIRY, ICECREAM, MVP now)
+    const buildVersion = (versionKey: string) => {
+      const prevVersion = prevDoc.versions?.[versionKey] || {
+        Carried: [],
+        "Not Carried": [],
+        Delisted: [],
+      };
 
+      const masterSkus = skuData[versionKey] || [];
+
+      // Carried SKUs from last week → carried over
+      const carried = carryOverSkus(prevVersion.Carried);
+
+      // Sets for quick lookup
+      const carriedValues = new Set(
+        prevVersion.Carried.map((s: any) => s.sku || s.value)
+      );
+      const delistedValues = new Set(
+        prevVersion.Delisted.map((s: any) => s.sku || s.value)
+      );
+
+      // Build Not Carried from masterlist
+      const notCarried = masterSkus
+        .filter(
+          (sku) =>
+            !carriedValues.has(sku.value) && !delistedValues.has(sku.value)
+        )
+        .map((sku) => ({
+          sku: sku.label,
+          skuCode: sku.value,
+          code: sku.code,
+          beginningPCS: "NC",
+          deliveryPCS: "NC",
+          rtvNo: "NC",
+          rtvPCS: "NC",
+          rtvReason: "NC",
+          endingPCS: "NC",
+          offtake: "NC",
+          inventoryDays: "NC",
+          expiry: [],
+          harvest: [], // ✅ blank harvest for new Not Carried
+        }));
+
+      return {
+        Carried: carried,
+        "Not Carried": notCarried,
+        Delisted: prevVersion.Delisted,
+      };
+    };
+
+    // 🔹 Apply to all versions (now includes MVP)
     const versions = {
-      DAIRY: {
-        Carried: carryOverSkus(
-          prevDoc.versions?.DAIRY?.Carried,
-          prevDoc.usageCount || 0
-        ),
-        "Not Carried": prevDoc.versions?.DAIRY?.["Not Carried"] || [],
-        Delisted: prevDoc.versions?.DAIRY?.Delisted || [],
-      },
-      ICECREAM: {
-        Carried: carryOverSkus(
-          prevDoc.versions?.ICECREAM?.Carried,
-          prevDoc.usageCount || 0
-        ),
-        "Not Carried": prevDoc.versions?.ICECREAM?.["Not Carried"] || [],
-        Delisted: prevDoc.versions?.ICECREAM?.Delisted || [],
-      },
-      MVP: {
-        Carried: carryOverMVP(prevDoc.versions?.MVP),
-        "Not Carried": prevDoc.versions?.MVP?.["Not Carried"] || [],
-        Delisted: prevDoc.versions?.MVP?.Delisted || [],
-      },
+      DAIRY: buildVersion("DAIRY"),
+      ICECREAM: buildVersion("ICECREAM"),
+      MVP: buildVersion("MVP"), // ✅ changed from buildMVP
     };
 
     return {
       email: prevDoc.email,
       merchandiser: prevDoc.merchandiser,
-      outlet: prevDoc.outlet, // auto fetched
+      outlet: prevDoc.outlet,
       date: nextInfo.startDate.format("YYYY-MM-DD"),
       weeksCovered: nextInfo.weeksCovered,
       month: nextInfo.month,
       week: nextInfo.week,
       versions,
       locked: false,
-      usageCount: (prevDoc.usageCount || 0) + 1,
+      usageCount: prevDoc.usageCount || 0,
     };
   }
 
