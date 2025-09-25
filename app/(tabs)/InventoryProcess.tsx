@@ -105,6 +105,7 @@ type VersionType = "DAIRY" | "ICECREAM" | "MVP";
 
 type GroupedInventory = {
   email: String;
+  week: number;
   date: string;
   merchandiser: string;
   outlet: string;
@@ -132,10 +133,11 @@ const InventoryProcess = () => {
   const [week, setWeek] = useState("");
   const [sku, setSku] = useState("");
   const [selectedSkuCode, setSelectedSkuCode] = useState("");
-
+  const currentWeek = moment().isoWeek();
+  const [showAdjustment, setShowAdjustment] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState(null);
   const [showCarryPrompt, setShowCarryPrompt] = useState<string | null>(null);
-
+  const [tempCarriedSelection, setTempCarriedSelection] = useState<any>({});
   const [availability, setAvailability] = useState<{
     [version: string]: { [skuKey: string]: string };
   }>({});
@@ -169,26 +171,6 @@ const InventoryProcess = () => {
   const openCategoryForm = (category: any) => {
     setExpandedCategory(category);
     // any other setup code you had before
-  };
-
-  const handleExpiryChange = (skuKey: string, month: string) => {
-    setSkuValues((prev: any) => ({
-      ...prev,
-      expiry: {
-        ...prev.expiry,
-        [skuKey]: month,
-      },
-    }));
-  };
-
-  const handleQuantityChange = (skuKey: string, qty: string) => {
-    setSkuValues((prev: any) => ({
-      ...prev,
-      quantity: {
-        ...prev.quantity,
-        [skuKey]: qty,
-      },
-    }));
   };
 
   const [showDatePicker, setShowDatePicker] = useState<{
@@ -246,41 +228,47 @@ const InventoryProcess = () => {
     });
   };
 
-  const addExpiryEntry = (skuKey: string) => {
+  const handleAdjustment = (
+    type: "adjustPlus" | "adjustMinus",
+    skuKey: string,
+    value: string
+  ) => {
     setSkuValues((prev: any) => {
-      const existing = prev.expiry?.[version]?.[skuKey] || [];
-      const updated = [...existing, { date: "", quantity: "" }];
-      return {
-        ...prev,
-        expiry: {
-          ...prev.expiry,
-          [version]: {
-            ...(prev.expiry?.[version] || {}),
-            [skuKey]: updated,
-          },
-        },
-      };
-    });
-  };
+      const copy = { ...prev };
+      if (!copy[version]) copy[version] = {};
+      if (!copy[version][skuKey]) copy[version][skuKey] = {};
 
-  const deleteExpiryEntry = (skuKey: string, index: number) => {
-    setSkuValues((prev: any) => {
-      const existing = prev.expiry?.[version]?.[skuKey] || [];
-      const updated = existing.filter(
-        (_: { month: string; quantity: string | number }, i: number) =>
-          i !== index
-      );
+      // normalize numeric
+      let storeValue: any = value;
+      if (value === "" || value === null || value === undefined) {
+        storeValue = ""; // keep empty when cleared
+      } else {
+        const cleaned = String(value).replace(/\D/g, "");
+        storeValue = cleaned === "" ? "" : parseInt(cleaned, 10);
+      }
 
-      return {
-        ...prev,
-        expiry: {
-          ...prev.expiry,
-          [version]: {
-            ...(prev.expiry?.[version] || {}),
-            [skuKey]: updated,
-          },
-        },
+      copy[version][skuKey] = {
+        ...copy[version][skuKey],
+        [type]: storeValue,
       };
+
+      // recalc offtake live (same as next inventory)
+      const b = Number(copy.beginning?.[version]?.[skuKey] || 0);
+      const d = Number(copy.delivery?.[version]?.[skuKey] || 0);
+      const r = Number(copy.rtv?.[version]?.[skuKey] || 0);
+      const e = Number(copy.ending?.[version]?.[skuKey] || 0);
+
+      const ap = Number(copy[version][skuKey].adjustPlus || 0);
+      const am = Number(copy[version][skuKey].adjustMinus || 0);
+
+      const thisOfftake = b + d - r - e + ap - am;
+
+      if (!copy.offtake) copy.offtake = {};
+      if (!copy.offtake[version]) copy.offtake[version] = {};
+
+      copy.offtake[version][skuKey] = thisOfftake;
+
+      return copy;
     });
   };
 
@@ -314,7 +302,23 @@ const InventoryProcess = () => {
         skuValues.ending?.[version]?.[skuItem.value] || "0"
       );
 
-      const calculatedOfftake = beginning + delivery - rtv - ending;
+      // 🟢 adjustments — handle "" properly
+      const rawPlus = skuValues[version]?.[skuItem.value]?.adjustPlus;
+      const rawMinus = skuValues[version]?.[skuItem.value]?.adjustMinus;
+
+      const adjustPlus =
+        rawPlus === "" || rawPlus === undefined || rawPlus === null
+          ? 0
+          : parseFloat(rawPlus);
+
+      const adjustMinus =
+        rawMinus === "" || rawMinus === undefined || rawMinus === null
+          ? 0
+          : parseFloat(rawMinus);
+
+      const calculatedOfftake =
+        beginning + delivery - rtv - ending + adjustPlus - adjustMinus;
+
       newOfftake[skuItem.value] = calculatedOfftake.toFixed(2);
     });
 
@@ -343,6 +347,7 @@ const InventoryProcess = () => {
     skuValues.delivery?.[version],
     skuValues.rtv?.[version],
     skuValues.ending?.[version],
+    skuValues[version], // watches adjustments too
   ]);
 
   useEffect(() => {
@@ -821,38 +826,13 @@ const InventoryProcess = () => {
         if (avail === "Not Carried" || avail === "Delisted") {
           completedCount++;
         } else {
-          if (v === "MVP") {
-            // ✅ MVP: Only requires Harvest
-            const harvestList = skuValues.harvest?.[v]?.[key] || [];
-            const isValidHarvest = harvestList.some(
-              (entry: { date?: string; quantity?: string | number }) =>
-                !!entry?.date &&
-                entry?.quantity !== "" &&
-                !isNaN(Number(entry.quantity)) &&
-                Number(entry.quantity) > 0
-            );
+          // ✅ MVP, DAIRY, ICECREAM: All require Beginning + Delivery + Ending
+          const b = skuValues.beginning?.[v]?.[key] || "";
+          const d = skuValues.delivery?.[v]?.[key] || "";
+          const e = skuValues.ending?.[v]?.[key] || "";
 
-            if (isValidHarvest) {
-              completedCount++; // ✅ Count once per SKU
-            }
-          } else if (v === "DAIRY") {
-            // ✅ DAIRY: Both Beginning + Delivery required
-            const b = skuValues.beginning?.[v]?.[key] || "";
-            const d = skuValues.delivery?.[v]?.[key] || "";
-            const e = skuValues.ending?.[v]?.[key] || "";
-
-            if (b !== "" && d !== "" && e !== "") {
-              completedCount++; // ✅ Count once only if BOTH filled
-            }
-          } else if (v === "ICECREAM") {
-            // ✅ ICECREAM: Requires Beginning + Delivery + Ending
-            const b = skuValues.beginning?.[v]?.[key] || "";
-            const d = skuValues.delivery?.[v]?.[key] || "";
-            const e = skuValues.ending?.[v]?.[key] || "";
-
-            if (b !== "" && d !== "" && e !== "") {
-              completedCount++; // ✅ Count once only if ALL filled
-            }
+          if (b !== "" && d !== "" && e !== "") {
+            completedCount++; // ✅ Count once per SKU
           }
         }
       });
@@ -908,31 +888,8 @@ const InventoryProcess = () => {
 
         if (status === "Not Carried" || status === "Delisted") return true;
 
-        // ✅ MVP: Only Harvest required
-        if (version === "MVP") {
-          const harvestList = skuValues.harvest?.[version]?.[key] || [];
-
-          const hasValidEntry = harvestList.some(
-            (entry: { date: string; quantity: string | number }) =>
-              !!entry?.date &&
-              entry?.quantity !== "" &&
-              !isNaN(Number(entry.quantity)) &&
-              Number(entry.quantity) > 0
-          );
-
-          const hasInvalidEntry = harvestList.some(
-            (entry: { date: string; quantity: string | number }) =>
-              !entry?.date ||
-              entry.quantity === "" ||
-              isNaN(Number(entry.quantity)) ||
-              Number(entry.quantity) <= 0
-          );
-
-          return hasValidEntry && !hasInvalidEntry;
-        }
-
-        // ✅ ICECREAM: Only Beginning + Delivery + Ending
-        if (version === "ICECREAM") {
+        // ✅ MVP and ICECREAM: Beginning + Delivery + Ending are required
+        if (version === "MVP" || version === "ICECREAM") {
           const b = skuValues.beginning?.[version]?.[key] || "";
           const d = skuValues.delivery?.[version]?.[key] || "";
           const e = skuValues.ending?.[version]?.[key] || "";
@@ -940,7 +897,7 @@ const InventoryProcess = () => {
           return b !== "" && d !== "" && e !== "";
         }
 
-        // ✅ DAIRY: Only Beginning + Delivery
+        // ✅ DAIRY: Beginning + Delivery are required
         if (version === "DAIRY") {
           const b = skuValues.beginning?.[version]?.[key] || "";
           const d = skuValues.delivery?.[version]?.[key] || "";
@@ -985,10 +942,13 @@ const InventoryProcess = () => {
 
     setLoading(true);
 
+    const currentWeek = moment().isoWeek();
+
     const versions: VersionType[] = ["DAIRY", "ICECREAM", "MVP"];
 
     const groupedInventory: GroupedInventory = {
       email,
+      week: currentWeek,
       date,
       merchandiser,
       outlet: selectedOutlet,
@@ -1007,80 +967,76 @@ const InventoryProcess = () => {
         const status = (availability[v]?.[skuKey] ||
           "Carried") as AvailabilityType;
 
-        const commonFields =
-          v === "MVP"
-            ? { sku: skuItem.label, skuCode: skuKey }
-            : { sku: skuItem.label, skuCode: skuKey, code: skuItem.code };
+        const commonFields = {
+          sku: skuItem.label,
+          ...(skuKey ? { skuCode: skuKey } : {}),
+          ...(skuItem.code ? { code: skuItem.code } : {}),
+        };
 
         if (status === "Carried") {
-          if (v === "MVP") {
-            // ✅ MVP: Harvest only (expiry/oos not required)
-            const harvestList = skuValues.harvest?.[v]?.[skuKey] || [];
-            const validHarvest = harvestList.filter(
-              (entry: { date: string; quantity: string | number }) =>
-                !!entry?.date &&
-                entry?.quantity !== "" &&
-                !isNaN(Number(entry.quantity)) &&
-                Number(entry.quantity) > 0
-            );
+          const beginning = Number(skuValues.beginning?.[v]?.[skuKey] || 0);
+          const delivery = Number(skuValues.delivery?.[v]?.[skuKey] || 0);
+          const rtvNo = skuValues.rtvNo?.[v] || "";
+          const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0);
+          const rtvReason = skuValues.rtvReason?.[v]?.[skuKey] || "";
+          const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0);
 
-            groupedInventory.versions[v][status].push({
-              ...commonFields,
-              harvest: validHarvest.map((entry: any) => ({
+          const adjustPlus = Number(skuValues[v]?.[skuKey]?.adjustPlus || 0);
+          const adjustMinus = Number(skuValues[v]?.[skuKey]?.adjustMinus || 0);
+
+          const offtake =
+            beginning + delivery - rtv - ending + adjustPlus - adjustMinus;
+
+          groupedInventory.versions[v][status].push({
+            ...commonFields,
+            beginningPCS: beginning,
+            deliveryPCS: delivery,
+            rtvNo,
+            rtvPCS: rtv,
+            rtvReason,
+            endingPCS: ending,
+            offtake,
+            adjustPlus, // 👈 added
+            adjustMinus,
+            oos: Number(skuValues.oos?.[v]?.[skuKey] || 0),
+
+            harvest: (skuValues.harvest?.[v]?.[skuKey] || [])
+              .filter(
+                (entry: { date?: string; quantity?: string | number }) =>
+                  !!entry?.date &&
+                  entry?.quantity !== "" &&
+                  !isNaN(Number(entry.quantity)) &&
+                  Number(entry.quantity) > 0
+              )
+              .map((entry: { date: string; quantity: string | number }) => ({
                 date: entry.date,
                 quantity: Number(entry.quantity),
               })),
-              expiry: [], // not required
-              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0), // optional
-              totalOfftake: 0,
-              usageCount: 0,
-              avgOfftake: 0,
-            });
-          } else {
-            // ✅ DAIRY + ICECREAM
-            const beginning = Number(skuValues.beginning?.[v]?.[skuKey] || 0);
-            const delivery = Number(skuValues.delivery?.[v]?.[skuKey] || 0);
-            const rtvNo = skuValues.rtvNo?.[v] || ""; // optional
-            const rtv = Number(skuValues.rtv?.[v]?.[skuKey] || 0); // optional
-            const rtvReason = skuValues.rtvReason?.[v]?.[skuKey] || ""; // optional
-            const ending = Number(skuValues.ending?.[v]?.[skuKey] || 0); // optional
 
-            const offtake = beginning + delivery - rtv - ending;
+            expiry: (skuValues.expiry?.[v]?.[skuKey] || [])
+              .filter(
+                (entry: { date?: string; quantity?: string | number }) =>
+                  !!entry?.date &&
+                  entry?.quantity !== "" &&
+                  !isNaN(Number(entry.quantity)) &&
+                  Number(entry.quantity) > 0
+              )
+              .map((entry: { date: string; quantity: string | number }) => ({
+                date: entry.date,
+                quantity: Number(entry.quantity),
+              })),
 
-            groupedInventory.versions[v][status].push({
-              ...commonFields,
-              beginningPCS: beginning,
-              deliveryPCS: delivery,
-              rtvNo,
-              rtvPCS: rtv,
-              rtvReason,
-              endingPCS: ending,
-              offtake,
-              oos: Number(skuValues.oos?.[v]?.[skuKey] || 0), // optional
-              harvest: [],
-              expiry: (skuValues.expiry?.[v]?.[skuKey] || [])
-                .filter(
-                  (entry: { date?: string; quantity?: string | number }) =>
-                    !!entry?.date &&
-                    entry?.quantity !== "" &&
-                    !isNaN(Number(entry.quantity)) &&
-                    Number(entry.quantity) > 0
-                )
-                .map((entry: { date: string; quantity: string | number }) => ({
-                  date: entry.date,
-                  quantity: Number(entry.quantity),
-                })),
-              totalOfftake: offtake,
-              usageCount: 0,
-              avgOfftake: offtake,
-            });
-          }
-        } else {
-          // Not Carried / Delisted
+            totalOfftake: offtake,
+            usageCount: 0,
+            avgOfftake: offtake,
+          });
+        }
+
+        // 👇 Add this for Not Carried
+        else if (status === "Not Carried") {
           groupedInventory.versions[v][status].push({
-            ...commonFields,
-            harvest: [],
-            expiry: [],
+            sku: skuItem.label,
+            ...(skuKey ? { skuCode: skuKey } : {}),
           });
         }
       }
@@ -1159,7 +1115,7 @@ const InventoryProcess = () => {
       >
         <View style={styles.appBarExpiry}>
           <Text style={styles.appBarTitleInventoryprocess}>
-            INVENTORY PROCESS
+            INITIAL INVENTORY PROCESS
           </Text>
         </View>
 
@@ -1171,6 +1127,12 @@ const InventoryProcess = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <LabeledInput
+            label="Week"
+            value={`Week ${currentWeek}`}
+            onChangeText={() => {}}
+            editable={false}
+          />
           <LabeledInput
             label="Date"
             value={date}
@@ -1191,7 +1153,6 @@ const InventoryProcess = () => {
             editable={false}
             style={{ height: 0, opacity: 0 }}
           />
-
           <DropDownPicker
             open={open}
             value={selectedOutlet}
@@ -1244,33 +1205,7 @@ const InventoryProcess = () => {
                   return;
                 }
 
-                if (v === "MVP") {
-                  const harvestList = skuValues.harvest?.[v]?.[key] || [];
-                  const isValidHarvest = harvestList.some(
-                    (entry: { date?: string; quantity?: string | number }) =>
-                      !!entry?.date &&
-                      entry?.quantity !== "" &&
-                      !isNaN(Number(entry.quantity)) &&
-                      Number(entry.quantity) > 0
-                  );
-                  const o = skuValues.oos?.[v]?.[key] || "";
-
-                  if (isValidHarvest && o !== "") {
-                    completedSkuCount++;
-                  }
-                }
-
-                if (v === "ICECREAM") {
-                  const b = skuValues.beginning?.[v]?.[key] || "";
-                  const d = skuValues.delivery?.[v]?.[key] || "";
-                  const e = skuValues.ending?.[v]?.[key] || "";
-
-                  if (b !== "" && d !== "" && e !== "") {
-                    completedSkuCount++;
-                  }
-                }
-
-                if (v === "DAIRY") {
+                if (v === "MVP" || v === "ICECREAM" || v === "DAIRY") {
                   const b = skuValues.beginning?.[v]?.[key] || "";
                   const d = skuValues.delivery?.[v]?.[key] || "";
                   const e = skuValues.ending?.[v]?.[key] || "";
@@ -1335,7 +1270,7 @@ const InventoryProcess = () => {
                   ]}
                   onPress={() => {
                     if (isDisabled) return;
-                    setShowCarryPrompt(v); // Always open carry prompt when switching
+                    setShowCarryPrompt(v); // ✅ always open the new SKU modal
                   }}
                   disabled={isDisabled}
                 >
@@ -1356,729 +1291,797 @@ const InventoryProcess = () => {
             {showCarryPrompt && (
               <Modal
                 visible={!!showCarryPrompt}
-                transparent={true}
+                transparent
                 animationType="fade"
                 onRequestClose={() => setShowCarryPrompt(null)}
               >
                 <View style={styles.modalOverlay}>
                   <View style={styles.modalContainerCategory}>
                     <Text style={styles.modalTitle}>
-                      Is this category carried?
+                      Select which SKUs are Carried
                     </Text>
 
-                    <View style={{ marginVertical: 10 }}>
-                      <Button
-                        title="Carried"
-                        color="#844515"
-                        onPress={() => {
-                          const versionSkus = skuData[showCarryPrompt] || [];
-                          const updatedAvailability = { ...availability };
-                          versionSkus.forEach((skuItem) => {
-                            const key = skuItem.value;
-                            updatedAvailability[showCarryPrompt] = {
-                              ...updatedAvailability[showCarryPrompt],
-                              [key]: "Carried",
-                            };
-                          });
-                          setAvailability(updatedAvailability);
-                          setShowCarryPrompt(null);
-                          setVersion(showCarryPrompt);
-                          setSku("");
-                          setExpandedSection(null);
-                          openCategoryForm(showCarryPrompt);
-                        }}
-                      />
+                    <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
+                      {(skuData[showCarryPrompt] || []).map((skuItem: any) => {
+                        const key = skuItem.value;
+                        const isSelected = tempCarriedSelection?.[key] ?? false;
 
-                      {/* Gap between buttons */}
-                      <View style={{ height: 10 }} />
+                        return (
+                          <TouchableOpacity
+                            key={key}
+                            onPress={() => {
+                              setTempCarriedSelection((prev: any) => ({
+                                ...prev,
+                                [key]: !isSelected,
+                              }));
+                            }}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginVertical: 5,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 20,
+                                height: 20,
+                                borderWidth: 1,
+                                borderColor: "#333",
+                                marginRight: 10,
+                                backgroundColor: isSelected
+                                  ? "#844515"
+                                  : "transparent",
+                              }}
+                            />
+                            <Text>{skuItem.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
 
-                      <Button
-                        title="Not Carried"
-                        color="#490000"
-                        onPress={() => {
-                          const versionSkus = skuData[showCarryPrompt] || [];
-                          const updatedAvailability = { ...availability };
-                          versionSkus.forEach((skuItem) => {
-                            const key = skuItem.value;
-                            updatedAvailability[showCarryPrompt] = {
-                              ...updatedAvailability[showCarryPrompt],
-                              [key]: "Not Carried",
-                            };
-                          });
-                          setAvailability(updatedAvailability);
-                          setShowCarryPrompt(null);
-                        }}
-                      />
-                    </View>
+                    <Button
+                      title="Save Selection"
+                      color="#844515"
+                      onPress={() => {
+                        const versionSkus = skuData[showCarryPrompt] || [];
+                        const updatedAvailability = { ...availability };
+
+                        versionSkus.forEach((skuItem: any) => {
+                          const key = skuItem.value;
+                          updatedAvailability[showCarryPrompt] = {
+                            ...updatedAvailability[showCarryPrompt],
+                            [key]: tempCarriedSelection?.[key]
+                              ? "Carried"
+                              : "Not Carried",
+                          };
+                        });
+
+                        setAvailability(updatedAvailability);
+                        setTempCarriedSelection({});
+                        setShowCarryPrompt(null);
+                        setVersion(showCarryPrompt);
+                        setSku("");
+                        setExpandedSection(null);
+                        openCategoryForm(showCarryPrompt); // ✅ keep your existing logic
+                      }}
+                    />
                   </View>
                 </View>
               </Modal>
             )}
           </View>
 
-          {version === "MVP" && (
+          {/* {version !== "MVP" && ( */}
+          <View>
+            {["Beginning", "Delivery", "RTV No.", "RTV"].map((section) => {
+              const sectionKey = section.toLowerCase();
+
+              if (section === "RTV No.") {
+                return (
+                  <View key={section} style={{ marginVertical: 10 }}>
+                    <TouchableOpacity
+                      style={styles.expandButton}
+                      onPress={() =>
+                        setExpandedSection((prev) =>
+                          prev === section ? null : section
+                        )
+                      }
+                    >
+                      <Text style={styles.expandButtonText}>
+                        {expandedSection === section
+                          ? `Hide ${section}`
+                          : `Expand ${section}`}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {expandedSection === section && (
+                      <View
+                        style={{
+                          marginTop: 10,
+                          flexDirection: "row",
+                          alignItems: "center",
+                        }}
+                      >
+                        {/* Left Label */}
+                        <Text style={{ flex: 1, fontSize: 11 }}>
+                          RTV NUMBER
+                        </Text>
+
+                        {/* Right Input */}
+                        <TextInput
+                          style={[
+                            styles.inputBox,
+                            {
+                              flex: 1,
+                              height: 40,
+                              textAlign: "center",
+                              borderColor: "#844515",
+                              borderWidth: 1,
+                              backgroundColor: "#FFFFFF",
+                            },
+                          ]}
+                          placeholder="Enter RTV Number"
+                          placeholderTextColor="#000000ff"
+                          value={skuValues.rtvNo?.[version] || ""}
+                          onChangeText={(text) => {
+                            setSkuValues((prev: any) => ({
+                              ...prev,
+                              rtvNo: {
+                                ...(prev.rtvNo || {}),
+                                [version]: text,
+                              },
+                            }));
+                          }}
+                        />
+                      </View>
+                    )}
+                  </View>
+                );
+              }
+
+              const filledCount = filteredSkuOptions.filter((skuItem) => {
+                const skuKey = skuItem.value;
+                const val = skuValues[sectionKey]?.[version]?.[skuKey];
+
+                const availStatus = availability[version]?.[skuKey];
+
+                // Count if value is filled or availability is Not Carried / Delisted
+                return (
+                  (val !== undefined && val !== "") ||
+                  availStatus === "Not Carried" ||
+                  availStatus === "Delisted"
+                );
+              }).length;
+
+              const totalSkuCount = filteredSkuOptions.length;
+
+              return (
+                <View key={section} style={{ marginVertical: 10 }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.expandButton,
+                      sectionKey === "rtv" &&
+                        !Object.values(skuValues?.rtvNo?.[version] || {}).some(
+                          (val) => !!val
+                        ) && {
+                          opacity: 0.5, // visually indicate disabled
+                        },
+                    ]}
+                    disabled={
+                      sectionKey === "rtv" &&
+                      !Object.values(skuValues?.rtvNo?.[version] || {}).some(
+                        (val) => !!val
+                      )
+                    }
+                    onPress={() => {
+                      setExpandedSection((prev) =>
+                        prev === section ? null : section
+                      );
+                    }}
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {expandedSection === section
+                        ? `Hide ${section} ${filledCount}/${totalSkuCount}`
+                        : `Expand ${section} ${filledCount}/${totalSkuCount}`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {expandedSection === section && (
+                    <View style={{ marginTop: 10 }}>
+                      {filteredSkuOptions.map((skuItem) => {
+                        const skuKey = skuItem.value;
+                        const isBeginning = sectionKey === "beginning";
+                        const isRTV = sectionKey === "rtv";
+
+                        const availabilityValue =
+                          availability[version]?.[skuKey] ??
+                          (isBeginning || isRTV ? "Carried" : "");
+
+                        const isBeginningEditable =
+                          isBeginning && availabilityValue === "Carried";
+                        const isOtherSectionEditable =
+                          !isBeginning &&
+                          !isRTV &&
+                          availability[version]?.[skuKey] === "Carried";
+
+                        // Extra checks for RTV
+                        const hasRTVReason = !!rtvReason?.[version]?.[skuKey];
+
+                        const isEditable = isBeginning
+                          ? isBeginningEditable
+                          : isRTV
+                          ? availabilityValue === "Carried" && hasRTVReason
+                          : isOtherSectionEditable;
+
+                        return (
+                          <TouchableOpacity
+                            key={skuKey}
+                            activeOpacity={1} // Keep the row visible when touched
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginBottom: 8,
+                            }}
+                          >
+                            {/* SKU Label */}
+                            <ScrollView
+                              horizontal
+                              style={{ flex: 1 }}
+                              contentContainerStyle={{ paddingRight: 10 }}
+                              scrollEnabled={true}
+                            >
+                              <Text style={styles.skuText} numberOfLines={1}>
+                                {skuItem.label}
+                              </Text>
+                            </ScrollView>
+
+                            {/* Availability Picker (Beginning only) */}
+                            {(isBeginning || isRTV) && (
+                              <View
+                                style={{
+                                  flex: isBeginning || isRTV ? 0.5 : 1,
+                                  marginHorizontal: 2,
+                                  borderWidth: 1,
+                                  borderColor: "#ccc",
+                                  borderRadius: 4,
+                                  overflow: "hidden",
+                                  minWidth: isBeginning || isRTV ? 80 : 80,
+                                  height: 50,
+                                }}
+                              >
+                                {isBeginning ? (
+                                  <>
+                                    <Picker
+                                      selectedValue={availabilityValue}
+                                      style={{
+                                        height: 50,
+                                        width: "100%",
+                                        backgroundColor: "white",
+                                      }}
+                                      itemStyle={{
+                                        fontSize: 11,
+                                      }}
+                                      onValueChange={(value) => {
+                                        setAvailability((prev) => ({
+                                          ...prev,
+                                          [version]: {
+                                            ...(prev[version] || {}),
+                                            [skuKey]: value,
+                                          },
+                                        }));
+
+                                        if (value !== "Carried") {
+                                          setSkuValues((prev: any) => ({
+                                            ...prev,
+                                            beginning: {
+                                              ...(prev.beginning || {}),
+                                              [version]: {
+                                                ...(prev.beginning?.[version] ||
+                                                  {}),
+                                                [skuKey]: "",
+                                              },
+                                            },
+                                            delivery: {
+                                              ...(prev.delivery || {}),
+                                              [version]: {
+                                                ...(prev.delivery?.[version] ||
+                                                  {}),
+                                                [skuKey]: "",
+                                              },
+                                            },
+                                            ending: {
+                                              ...(prev.ending || {}),
+                                              [version]: {
+                                                ...(prev.ending?.[version] ||
+                                                  {}),
+                                                [skuKey]: "",
+                                              },
+                                            },
+                                            oos: {
+                                              ...(prev.oos || {}),
+                                              [version]: {
+                                                ...(prev.oos?.[version] || {}),
+                                                [skuKey]: "",
+                                              },
+                                            },
+                                          }));
+                                        }
+                                      }}
+                                      mode="dropdown"
+                                    >
+                                      <Picker.Item
+                                        label="Carried"
+                                        value="Carried"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Not Carried"
+                                        value="Not Carried"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                    </Picker>
+                                    <Icon
+                                      name="arrow-drop-down"
+                                      size={24}
+                                      color="grey"
+                                      style={{
+                                        position: "absolute",
+                                        right: 10,
+                                        top: 13,
+                                        pointerEvents: "none",
+                                      }}
+                                    />
+                                  </>
+                                ) : isRTV ? (
+                                  <>
+                                    <Picker
+                                      selectedValue={
+                                        rtvReason[version]?.[skuKey] || ""
+                                      }
+                                      style={{
+                                        height: 50,
+                                        width: "100%",
+                                        backgroundColor: "white",
+                                      }}
+                                      itemStyle={{
+                                        fontSize: 11,
+                                      }}
+                                      onValueChange={(value) => {
+                                        setRtvReason((prev) => ({
+                                          ...prev,
+                                          [version]: {
+                                            ...(prev[version] || {}),
+                                            [skuKey]: value,
+                                          },
+                                        }));
+
+                                        setSkuValues((prev: any) => ({
+                                          ...prev,
+                                          rtvReason: {
+                                            ...(prev.rtvReason || {}),
+                                            [version]: {
+                                              ...(prev.rtvReason?.[version] ||
+                                                {}),
+                                              [skuKey]: value,
+                                            },
+                                          },
+                                        }));
+
+                                        if (value === "") {
+                                          setSkuValues((prev: any) => ({
+                                            ...prev,
+                                            rtv: {
+                                              ...(prev.rtv || {}),
+                                              [version]: {
+                                                ...(prev.rtv?.[version] || {}),
+                                                [skuKey]: "",
+                                              },
+                                            },
+                                          }));
+                                        }
+                                      }}
+                                      mode="dropdown"
+                                    >
+                                      <Picker.Item
+                                        label="Select Reason"
+                                        value=""
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Damaged"
+                                        value="Damaged"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Near Expiry"
+                                        value="Near Expiry"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Expired"
+                                        value="Expired"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Discoloration"
+                                        value="Discoloration"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Voluntary Pullout"
+                                        value="Voluntary Pullout"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                      <Picker.Item
+                                        label="Delivered Near Expiry"
+                                        value="Delivered Near Expiry"
+                                        style={{
+                                          fontSize: 11,
+                                          color: "black",
+                                        }}
+                                      />
+                                    </Picker>
+                                    <Icon
+                                      name="arrow-drop-down"
+                                      size={24}
+                                      color="grey"
+                                      style={{
+                                        position: "absolute",
+                                        right: 10,
+                                        top: 13,
+                                        pointerEvents: "none",
+                                      }}
+                                    />
+                                  </>
+                                ) : null}
+                              </View>
+                            )}
+
+                            {/* Quantity Input (editable only if Carried or RTV reason is selected) */}
+                            <TextInput
+                              style={[
+                                styles.inputBox,
+                                {
+                                  width: 52,
+                                  height: 40,
+                                  marginLeft: isBeginning || isRTV ? 0 : 6,
+                                  textAlign: "center",
+                                  backgroundColor: isEditable
+                                    ? "#FFFFFF"
+                                    : "#f0f0f0",
+                                  borderColor: isEditable ? "#844515" : "#ccc",
+                                  borderWidth: 1,
+                                },
+                              ]}
+                              keyboardType="numeric"
+                              value={
+                                skuValues[sectionKey]?.[version]?.[skuKey] || ""
+                              }
+                              onChangeText={(text) => {
+                                if (/^\d*$/.test(text)) {
+                                  setSkuValues((prev: any) => ({
+                                    ...prev,
+                                    [sectionKey]: {
+                                      ...(prev[sectionKey] || {}),
+                                      [version]: {
+                                        ...(prev[sectionKey]?.[version] || {}),
+                                        [skuKey]: text,
+                                      },
+                                    },
+                                  }));
+                                }
+                              }}
+                              editable={isEditable}
+                            />
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+
+            {/* Expandable Ending Section with count */}
+            {(() => {
+              const section = "Ending";
+              const sectionKey = "ending";
+
+              const filledCount = filteredSkuOptions.filter((skuItem) => {
+                const skuKey = skuItem.value;
+                const val = skuValues[sectionKey]?.[version]?.[skuKey];
+                const availStatus = availability[version]?.[skuKey];
+
+                return (
+                  (val !== undefined && val !== "") ||
+                  availStatus === "Not Carried" ||
+                  availStatus === "Delisted"
+                );
+              }).length;
+
+              const totalSkuCount = filteredSkuOptions.length;
+
+              return (
+                <View style={{ marginVertical: 10 }}>
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() =>
+                      setExpandedSection((prev) =>
+                        prev === section ? null : section
+                      )
+                    }
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {expandedSection === section
+                        ? `Hide Ending ${filledCount}/${totalSkuCount}`
+                        : `Expand Ending ${filledCount}/${totalSkuCount}`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {expandedSection === section && (
+                    <TouchableOpacity
+                      style={{ marginTop: 10 }}
+                      activeOpacity={1}
+                      onPress={() => {}}
+                    >
+                      {filteredSkuOptions.map((skuItem) => {
+                        const skuKey = skuItem.value;
+                        const availabilityValue =
+                          availability[version]?.[skuKey] || "Carried";
+
+                        return (
+                          <View key={skuKey} style={styles.skuItemRow}>
+                            <Text style={styles.skuText}>{skuItem.label}</Text>
+
+                            <TextInput
+                              style={[
+                                styles.inputBox,
+                                {
+                                  width: 52,
+                                  height: 40,
+                                  textAlign: "center",
+                                  backgroundColor:
+                                    availabilityValue === "Carried"
+                                      ? "#FFFFFF"
+                                      : "#f0f0f0",
+                                  borderColor:
+                                    availabilityValue === "Carried"
+                                      ? "#844515"
+                                      : "#ccc",
+                                  borderWidth: 1,
+                                },
+                              ]}
+                              keyboardType="numeric"
+                              editable={availabilityValue === "Carried"}
+                              value={
+                                skuValues.ending?.[version]?.[skuKey] || ""
+                              }
+                              onChangeText={(text) => {
+                                if (/^\d*$/.test(text)) {
+                                  setSkuValues((prev: any) => ({
+                                    ...prev,
+                                    ending: {
+                                      ...(prev.ending || {}),
+                                      [version]: {
+                                        ...(prev.ending?.[version] || {}),
+                                        [skuKey]: text,
+                                      },
+                                    },
+                                  }));
+                                }
+                              }}
+                            />
+                          </View>
+                        );
+                      })}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })()}
+
             <View style={{ marginVertical: 10 }}>
               <TouchableOpacity
                 style={styles.expandButton}
                 onPress={() =>
                   setExpandedSection((prev) =>
-                    prev === "Harvest" ? null : "Harvest"
+                    prev === "Offtake" ? null : "Offtake"
                   )
                 }
               >
                 <Text style={styles.expandButtonText}>
-                  {expandedSection === "Harvest"
-                    ? `Hide Harvest`
-                    : `Expand Harvest`}
+                  {expandedSection === "Offtake"
+                    ? `Hide Offtake`
+                    : `Expand Offtake`}
                 </Text>
               </TouchableOpacity>
 
-              {expandedSection === "Harvest" && (
+              {expandedSection === "Offtake" && (
                 <View style={{ marginTop: 10 }}>
-                  {skuData[version]?.map((skuItem) => {
-                    const harvestEntries =
-                      skuValues.harvest?.[version]?.[skuItem.value] || [];
-
-                    // Ensure at least one entry is always visible
-                    if (harvestEntries.length === 0) {
-                      harvestEntries.push({ date: "", quantity: "" });
-                    }
+                  {/* Offtake Display */}
+                  {filteredSkuOptions.map((skuItem) => {
+                    const value = Number(
+                      skuValues.offtake?.[version]?.[skuItem.value] || 0
+                    );
+                    const isNegative = value < 0;
 
                     return (
-                      <View key={skuItem.value} style={{ marginBottom: 16 }}>
-                        <Text style={[styles.skuText, { marginBottom: 6 }]}>
-                          {skuItem.label}
-                        </Text>
-
-                        {harvestEntries.map(
-                          (
-                            entry: { date: string; quantity: string | number },
-                            index: number
-                          ) => (
-                            <View
-                              key={`${skuItem.value}-${index}`}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                marginBottom: 8,
-                              }}
-                            >
-                              {/* Date Picker */}
-                              <View style={{ flex: 3, marginHorizontal: 8 }}>
-                                <TouchableOpacity
-                                  style={{
-                                    borderWidth: 1,
-                                    borderColor: "#ccc",
-                                    borderRadius: 4,
-                                    paddingVertical: 10,
-                                    paddingHorizontal: 12,
-                                  }}
-                                  onPress={() => {
-                                    setShowDatePicker({
-                                      skuKey: skuItem.value,
-                                      index,
-                                    });
-                                  }}
-                                >
-                                  <Text style={{ fontSize: 14 }}>
-                                    {entry.date
-                                      ? new Date(entry.date).toLocaleDateString(
-                                          "en-PH"
-                                        )
-                                      : "Select Date"}
-                                  </Text>
-                                </TouchableOpacity>
-
-                                {showDatePicker?.skuKey === skuItem.value &&
-                                  showDatePicker?.index === index && (
-                                    <DateTimePicker
-                                      value={
-                                        entry.date
-                                          ? new Date(entry.date)
-                                          : new Date()
-                                      }
-                                      mode="date"
-                                      display="default"
-                                      onChange={(event, selectedDate) => {
-                                        if (
-                                          event.type === "set" &&
-                                          selectedDate
-                                        ) {
-                                          handleHarvestEntryChange(
-                                            skuItem.value,
-                                            index,
-                                            "date",
-                                            selectedDate.toISOString()
-                                          );
-                                        }
-                                        setShowDatePicker(null);
-                                      }}
-                                    />
-                                  )}
-                              </View>
-
-                              {/* Quantity Field */}
-                              <TextInput
-                                placeholder="Qty"
-                                placeholderTextColor={"grey"}
-                                style={[
-                                  styles.inputBox,
-                                  {
-                                    flex: 2,
-                                    height: 40,
-                                    fontSize: 14,
-                                    backgroundColor: entry.date
-                                      ? "#fff"
-                                      : "#f0f0f0",
-                                    borderColor: entry.date
-                                      ? "#844515"
-                                      : "#ccc",
-                                    borderWidth: 1,
-                                  },
-                                ]}
-                                keyboardType="numeric"
-                                value={entry.quantity?.toString() || ""}
-                                onChangeText={(text) => {
-                                  if (!entry.date) {
-                                    Alert.alert("Please select a date first.");
-                                    return;
-                                  }
-
-                                  if (/^\d*$/.test(text)) {
-                                    handleHarvestEntryChange(
-                                      skuItem.value,
-                                      index,
-                                      "quantity",
-                                      text
-                                    );
-                                  }
-                                }}
-                              />
-                            </View>
-                          )
-                        )}
-                      </View>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        key={skuItem.value}
+                        style={styles.skuItemRow}
+                      >
+                        <Text style={styles.skuText}>{skuItem.label}</Text>
+                        <TextInput
+                          placeholder="Offtake"
+                          placeholderTextColor="grey"
+                          style={[
+                            styles.inputBox,
+                            isNegative && {
+                              borderColor: "red",
+                              borderWidth: 2,
+                              color: "red",
+                            },
+                          ]}
+                          editable={false}
+                          value={value === 0 ? "" : value.toFixed(2)}
+                        />
+                      </TouchableOpacity>
                     );
                   })}
-                </View>
-              )}
 
-              {/* OOS Section */}
-              <TouchableOpacity
-                style={[styles.expandButton, { marginTop: 20 }]}
-                onPress={() =>
-                  setExpandedSection((prev) =>
-                    prev === "No. of Days OOS" ? null : "No. of Days OOS"
-                  )
-                }
-              >
-                <Text style={styles.expandButtonText}>
-                  {(() => {
-                    const sectionKey = "oos";
-                    const filledCount = (skuData[version] || []).filter(
-                      (skuItem) => {
-                        const val =
-                          skuValues[sectionKey]?.[version]?.[skuItem.value];
-                        return val !== undefined && val !== "";
-                      }
-                    ).length;
-                    const totalSkuCount = (skuData[version] || []).length;
-                    return expandedSection === "No. of Days OOS"
-                      ? `Hide No. of Days OOS ${filledCount}/${totalSkuCount}`
-                      : `Expand No. of Days OOS ${filledCount}/${totalSkuCount}`;
-                  })()}
-                </Text>
-              </TouchableOpacity>
-
-              {expandedSection === "No. of Days OOS" && (
-                <View style={{ marginTop: 10 }}>
-                  {skuData[version]?.map((skuItem) => (
-                    <View key={skuItem.value} style={styles.skuItemRow}>
-                      <Text style={styles.skuText}>{skuItem.label}</Text>
-
-                      <TextInput
-                        placeholder="OOS"
-                        keyboardType="numeric"
-                        style={[
-                          styles.inputBox,
-                          {
-                            backgroundColor: "#fff",
-                            borderColor: "#844515",
-                            borderWidth: 1,
-                            height: 40,
-                            fontSize: 14,
-                            marginLeft: 10,
-                          },
-                        ]}
-                        value={
-                          skuValues.oos?.[version]?.[
-                            skuItem.value
-                          ]?.toString() || ""
-                        }
-                        onChangeText={(text) => {
-                          if (/^\d*$/.test(text)) {
-                            handleOOSChange(skuItem.value, text);
-                          }
-                        }}
-                      />
-                    </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          )}
-
-          {version !== "MVP" && (
-            <View>
-              {["Beginning", "Delivery", "RTV No.", "RTV"].map((section) => {
-                const sectionKey = section.toLowerCase();
-
-                if (section === "RTV No.") {
-                  return (
-                    <View key={section} style={{ marginVertical: 10 }}>
-                      <TouchableOpacity
-                        style={styles.expandButton}
-                        onPress={() =>
-                          setExpandedSection((prev) =>
-                            prev === section ? null : section
-                          )
-                        }
-                      >
-                        <Text style={styles.expandButtonText}>
-                          {expandedSection === section
-                            ? `Hide ${section}`
-                            : `Expand ${section}`}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {expandedSection === section && (
-                        <View
-                          style={{
-                            marginTop: 10,
-                            flexDirection: "row",
-                            alignItems: "center",
-                          }}
-                        >
-                          {/* Left Label */}
-                          <Text style={{ flex: 1, fontSize: 11 }}>
-                            RTV NUMBER
-                          </Text>
-
-                          {/* Right Input */}
-                          <TextInput
-                            style={[
-                              styles.inputBox,
-                              {
-                                flex: 1,
-                                height: 40,
-                                textAlign: "center",
-                                borderColor: "#844515",
-                                borderWidth: 1,
-                                backgroundColor: "#FFFFFF",
-                              },
-                            ]}
-                            placeholder="Enter RTV Number"
-                            value={skuValues.rtvNo?.[version] || ""}
-                            onChangeText={(text) => {
-                              setSkuValues((prev: any) => ({
-                                ...prev,
-                                rtvNo: {
-                                  ...(prev.rtvNo || {}),
-                                  [version]: text,
-                                },
-                              }));
-                            }}
-                          />
-                        </View>
-                      )}
-                    </View>
-                  );
-                }
-
-                const filledCount = filteredSkuOptions.filter((skuItem) => {
-                  const skuKey = skuItem.value;
-                  const val = skuValues[sectionKey]?.[version]?.[skuKey];
-
-                  const availStatus = availability[version]?.[skuKey];
-
-                  // Count if value is filled or availability is Not Carried / Delisted
-                  return (
-                    (val !== undefined && val !== "") ||
-                    availStatus === "Not Carried" ||
-                    availStatus === "Delisted"
-                  );
-                }).length;
-
-                const totalSkuCount = filteredSkuOptions.length;
-
-                return (
-                  <View key={section} style={{ marginVertical: 10 }}>
+                  {/* Adjustment Section */}
+                  <View style={{ marginTop: 16 }}>
                     <TouchableOpacity
-                      style={[
-                        styles.expandButton,
-                        sectionKey === "rtv" &&
-                          !Object.values(
-                            skuValues?.rtvNo?.[version] || {}
-                          ).some((val) => !!val) && {
-                            opacity: 0.5, // visually indicate disabled
-                          },
-                      ]}
-                      disabled={
-                        sectionKey === "rtv" &&
-                        !Object.values(skuValues?.rtvNo?.[version] || {}).some(
-                          (val) => !!val
-                        )
-                      }
-                      onPress={() => {
-                        setExpandedSection((prev) =>
-                          prev === section ? null : section
-                        );
+                      onPress={() => setShowAdjustment(!showAdjustment)}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginBottom: 8,
                       }}
                     >
-                      <Text style={styles.expandButtonText}>
-                        {expandedSection === section
-                          ? `Hide ${section} ${filledCount}/${totalSkuCount}`
-                          : `Expand ${section} ${filledCount}/${totalSkuCount}`}
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: "600",
+                          color: "#844515",
+                        }}
+                      >
+                        Adjustment
+                      </Text>
+                      <Text style={{ marginLeft: 6, color: "#844515" }}>
+                        {showAdjustment ? "▲" : "▼"}
                       </Text>
                     </TouchableOpacity>
 
-                    {expandedSection === section && (
-                      <View style={{ marginTop: 10 }}>
-                        {filteredSkuOptions.map((skuItem) => {
-                          const skuKey = skuItem.value;
-                          const isBeginning = sectionKey === "beginning";
-                          const isRTV = sectionKey === "rtv";
-
-                          const availabilityValue =
-                            availability[version]?.[skuKey] ??
-                            (isBeginning || isRTV ? "Carried" : "");
-
-                          const isBeginningEditable =
-                            isBeginning && availabilityValue === "Carried";
-                          const isOtherSectionEditable =
-                            !isBeginning &&
-                            !isRTV &&
-                            availability[version]?.[skuKey] === "Carried";
-
-                          // Extra checks for RTV
-                          const hasRTVReason = !!rtvReason?.[version]?.[skuKey];
-
-                          const isEditable = isBeginning
-                            ? isBeginningEditable
-                            : isRTV
-                            ? availabilityValue === "Carried" && hasRTVReason
-                            : isOtherSectionEditable;
+                    {showAdjustment && (
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        style={{ paddingLeft: 8 }}
+                      >
+                        {(filteredSkuOptions || []).map((sku: any) => {
+                          const status =
+                            availability[version]?.[sku.value] || "Carried"; // 👈 lookup
+                          const isCarried = status === "Carried";
 
                           return (
-                            <TouchableOpacity
-                              key={skuKey}
-                              activeOpacity={1} // Keep the row visible when touched
+                            <View
+                              key={sku.value}
                               style={{
                                 flexDirection: "row",
                                 alignItems: "center",
-                                marginBottom: 8,
+                                marginBottom: 10,
                               }}
                             >
-                              {/* SKU Label */}
-                              <ScrollView
-                                horizontal
-                                style={{ flex: 1 }}
-                                contentContainerStyle={{ paddingRight: 10 }}
-                                scrollEnabled={true}
-                              >
-                                <Text style={styles.skuText} numberOfLines={1}>
-                                  {skuItem.label}
-                                </Text>
-                              </ScrollView>
+                              <Text style={[styles.skuText, { flex: 1 }]}>
+                                {sku.label}
+                              </Text>
 
-                              {/* Availability Picker (Beginning only) */}
-                              {(isBeginning || isRTV) && (
-                                <View
-                                  style={{
-                                    flex: isBeginning || isRTV ? 0.5 : 1,
-                                    marginHorizontal: 2,
-                                    borderWidth: 1,
-                                    borderColor: "#ccc",
-                                    borderRadius: 4,
-                                    overflow: "hidden",
-                                    minWidth: isBeginning || isRTV ? 80 : 80,
-                                    height: 50,
-                                  }}
-                                >
-                                  {isBeginning ? (
-                                    <>
-                                      <Picker
-                                        selectedValue={availabilityValue}
-                                        style={{
-                                          height: 50,
-                                          width: "100%",
-                                          backgroundColor: "white",
-                                        }}
-                                        itemStyle={{
-                                          fontSize: 11,
-                                        }}
-                                        onValueChange={(value) => {
-                                          setAvailability((prev) => ({
-                                            ...prev,
-                                            [version]: {
-                                              ...(prev[version] || {}),
-                                              [skuKey]: value,
-                                            },
-                                          }));
-
-                                          if (value !== "Carried") {
-                                            setSkuValues((prev: any) => ({
-                                              ...prev,
-                                              beginning: {
-                                                ...(prev.beginning || {}),
-                                                [version]: {
-                                                  ...(prev.beginning?.[
-                                                    version
-                                                  ] || {}),
-                                                  [skuKey]: "",
-                                                },
-                                              },
-                                              delivery: {
-                                                ...(prev.delivery || {}),
-                                                [version]: {
-                                                  ...(prev.delivery?.[
-                                                    version
-                                                  ] || {}),
-                                                  [skuKey]: "",
-                                                },
-                                              },
-                                              ending: {
-                                                ...(prev.ending || {}),
-                                                [version]: {
-                                                  ...(prev.ending?.[version] ||
-                                                    {}),
-                                                  [skuKey]: "",
-                                                },
-                                              },
-                                              oos: {
-                                                ...(prev.oos || {}),
-                                                [version]: {
-                                                  ...(prev.oos?.[version] ||
-                                                    {}),
-                                                  [skuKey]: "",
-                                                },
-                                              },
-                                            }));
-                                          }
-                                        }}
-                                        mode="dropdown"
-                                      >
-                                        <Picker.Item
-                                          label="Carried"
-                                          value="Carried"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Not Carried"
-                                          value="Not Carried"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                      </Picker>
-                                      <Icon
-                                        name="arrow-drop-down"
-                                        size={24}
-                                        color="grey"
-                                        style={{
-                                          position: "absolute",
-                                          right: 10,
-                                          top: 13,
-                                          pointerEvents: "none",
-                                        }}
-                                      />
-                                    </>
-                                  ) : isRTV ? (
-                                    <>
-                                      <Picker
-                                        selectedValue={
-                                          rtvReason[version]?.[skuKey] || ""
-                                        }
-                                        style={{
-                                          height: 50,
-                                          width: "100%",
-                                          backgroundColor: "white",
-                                        }}
-                                        itemStyle={{
-                                          fontSize: 11,
-                                        }}
-                                        onValueChange={(value) => {
-                                          setRtvReason((prev) => ({
-                                            ...prev,
-                                            [version]: {
-                                              ...(prev[version] || {}),
-                                              [skuKey]: value,
-                                            },
-                                          }));
-
-                                          setSkuValues((prev: any) => ({
-                                            ...prev,
-                                            rtvReason: {
-                                              ...(prev.rtvReason || {}),
-                                              [version]: {
-                                                ...(prev.rtvReason?.[version] ||
-                                                  {}),
-                                                [skuKey]: value,
-                                              },
-                                            },
-                                          }));
-
-                                          if (value === "") {
-                                            setSkuValues((prev: any) => ({
-                                              ...prev,
-                                              rtv: {
-                                                ...(prev.rtv || {}),
-                                                [version]: {
-                                                  ...(prev.rtv?.[version] ||
-                                                    {}),
-                                                  [skuKey]: "",
-                                                },
-                                              },
-                                            }));
-                                          }
-                                        }}
-                                        mode="dropdown"
-                                      >
-                                        <Picker.Item
-                                          label="Select Reason"
-                                          value=""
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Damaged"
-                                          value="Damaged"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Near Expiry"
-                                          value="Near Expiry"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Expired"
-                                          value="Expired"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Discoloration"
-                                          value="Discoloration"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Voluntary Pullout"
-                                          value="Voluntary Pullout"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                        <Picker.Item
-                                          label="Delivered Near Expiry"
-                                          value="Delivered Near Expiry"
-                                          style={{
-                                            fontSize: 11,
-                                            color: "black",
-                                          }}
-                                        />
-                                      </Picker>
-                                      <Icon
-                                        name="arrow-drop-down"
-                                        size={24}
-                                        color="grey"
-                                        style={{
-                                          position: "absolute",
-                                          right: 10,
-                                          top: 13,
-                                          pointerEvents: "none",
-                                        }}
-                                      />
-                                    </>
-                                  ) : null}
-                                </View>
-                              )}
-
-                              {/* Quantity Input (editable only if Carried or RTV reason is selected) */}
+                              {/* + Adjustment */}
                               <TextInput
+                                placeholder="+"
+                                placeholderTextColor="#000000ff"
+                                keyboardType="numeric"
+                                editable={isCarried} // 👈 disable if not carried
                                 style={[
                                   styles.inputBox,
                                   {
-                                    width: 52,
-                                    height: 40,
-                                    marginLeft: isBeginning || isRTV ? 0 : 6,
+                                    width: 50,
+                                    height: 35,
                                     textAlign: "center",
-                                    backgroundColor: isEditable
-                                      ? "#FFFFFF"
-                                      : "#f0f0f0",
-                                    borderColor: isEditable
-                                      ? "#844515"
-                                      : "#ccc",
+                                    borderColor: isCarried ? "#4CAF50" : "#ccc",
                                     borderWidth: 1,
+                                    marginHorizontal: 4,
+                                    color: isCarried ? "#000000ff" : "#999",
                                   },
                                 ]}
-                                keyboardType="numeric"
                                 value={
-                                  skuValues[sectionKey]?.[version]?.[skuKey] ||
+                                  skuValues[version]?.[sku.value]?.adjustPlus ||
                                   ""
                                 }
-                                onChangeText={(text) => {
-                                  if (/^\d*$/.test(text)) {
-                                    setSkuValues((prev: any) => ({
-                                      ...prev,
-                                      [sectionKey]: {
-                                        ...(prev[sectionKey] || {}),
-                                        [version]: {
-                                          ...(prev[sectionKey]?.[version] ||
-                                            {}),
-                                          [skuKey]: text,
-                                        },
-                                      },
-                                    }));
-                                  }
-                                }}
-                                editable={isEditable}
+                                onChangeText={(text) =>
+                                  isCarried &&
+                                  handleAdjustment(
+                                    "adjustPlus",
+                                    sku.value,
+                                    text
+                                  )
+                                }
                               />
-                            </TouchableOpacity>
+
+                              {/* - Adjustment */}
+                              <TextInput
+                                placeholder="-"
+                                placeholderTextColor="black"
+                                keyboardType="numeric"
+                                editable={isCarried} // 👈 disable if not carried
+                                style={[
+                                  styles.inputBox,
+                                  {
+                                    width: 50,
+                                    height: 35,
+                                    textAlign: "center",
+                                    borderColor: isCarried ? "#F44336" : "#ccc",
+                                    borderWidth: 1,
+                                    marginHorizontal: 4,
+                                    color: isCarried ? "#000000ff" : "#999",
+                                  },
+                                ]}
+                                value={
+                                  skuValues[version]?.[sku.value]
+                                    ?.adjustMinus || ""
+                                }
+                                onChangeText={(text) =>
+                                  isCarried &&
+                                  handleAdjustment(
+                                    "adjustMinus",
+                                    sku.value,
+                                    text
+                                  )
+                                }
+                              />
+                            </View>
                           );
                         })}
-                      </View>
+                      </TouchableOpacity>
                     )}
                   </View>
-                );
-              })}
+                </View>
+              )}
+            </View>
 
-              {/* Expandable Ending Section with count */}
-              {(version === "MVP" ||
-                version === "ICECREAM" ||
-                version === "DAIRY") &&
-                (() => {
-                  const section = "Ending";
-                  const sectionKey = "ending";
+            <View style={{ marginVertical: 10 }}>
+              {/* OOS Section */}
+              {(() => {
+                const section = "No. of Days OOS";
+                const sectionKey = "oos";
 
-                  const filledCount = filteredSkuOptions.filter((skuItem) => {
+                const filledCount = (skuData[version] || []).filter(
+                  (skuItem) => {
                     const skuKey = skuItem.value;
                     const val = skuValues[sectionKey]?.[version]?.[skuKey];
                     const availStatus = availability[version]?.[skuKey];
@@ -2088,253 +2091,306 @@ const InventoryProcess = () => {
                       availStatus === "Not Carried" ||
                       availStatus === "Delisted"
                     );
-                  }).length;
+                  }
+                ).length;
 
-                  const totalSkuCount = filteredSkuOptions.length;
+                const totalSkuCount = (skuData[version] || []).length;
 
-                  return (
-                    <View style={{ marginVertical: 10 }}>
+                return (
+                  <>
+                    <TouchableOpacity
+                      style={styles.expandButton}
+                      onPress={() =>
+                        setExpandedSection((prev) =>
+                          prev === section ? null : section
+                        )
+                      }
+                    >
+                      <Text style={styles.expandButtonText}>
+                        {expandedSection === section
+                          ? `Hide No. of Days OOS ${filledCount}/${totalSkuCount}`
+                          : `Expand No. of Days OOS ${filledCount}/${totalSkuCount}`}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {expandedSection === section && (
                       <TouchableOpacity
-                        style={styles.expandButton}
-                        onPress={() =>
-                          setExpandedSection((prev) =>
-                            prev === section ? null : section
-                          )
-                        }
+                        activeOpacity={1}
+                        style={{ marginTop: 10 }}
                       >
-                        <Text style={styles.expandButtonText}>
-                          {expandedSection === section
-                            ? `Hide Ending ${filledCount}/${totalSkuCount}`
-                            : `Expand Ending ${filledCount}/${totalSkuCount}`}
-                        </Text>
-                      </TouchableOpacity>
+                        {(skuData[version] || []).map((skuItem) => {
+                          const skuKey = skuItem.value;
+                          const availabilityValue =
+                            availability[version]?.[skuKey] || "Carried";
 
-                      {expandedSection === section && (
-                        <TouchableOpacity
-                          style={{ marginTop: 10 }}
-                          activeOpacity={1}
-                          onPress={() => {}}
-                        >
-                          {filteredSkuOptions.map((skuItem) => {
-                            const skuKey = skuItem.value;
-                            const availabilityValue =
-                              availability[version]?.[skuKey] || "Carried";
+                          return (
+                            <View
+                              key={`${version}-${skuKey}`}
+                              style={styles.skuItemRow}
+                            >
+                              <Text style={styles.skuText}>
+                                {skuItem.label}
+                              </Text>
 
-                            return (
-                              <View key={skuKey} style={styles.skuItemRow}>
-                                <Text style={styles.skuText}>
-                                  {skuItem.label}
-                                </Text>
-
-                                <TextInput
-                                  style={[
-                                    styles.inputBox,
-                                    {
-                                      width: 52,
-                                      height: 40,
-                                      textAlign: "center",
-                                      backgroundColor:
-                                        availabilityValue === "Carried"
-                                          ? "#FFFFFF"
-                                          : "#f0f0f0",
-                                      borderColor:
-                                        availabilityValue === "Carried"
-                                          ? "#844515"
-                                          : "#ccc",
-                                      borderWidth: 1,
+                              <TextInput
+                                placeholderTextColor="#222021"
+                                keyboardType="numeric"
+                                style={[
+                                  styles.inputBox,
+                                  {
+                                    backgroundColor:
+                                      availabilityValue === "Carried"
+                                        ? "#fff"
+                                        : "#f0f0f0",
+                                    borderColor:
+                                      availabilityValue === "Carried"
+                                        ? "#844515"
+                                        : "#ccc",
+                                    borderWidth: 1,
+                                    height: 40,
+                                    fontSize: 14,
+                                    marginLeft: 10,
+                                    color: "#000",
+                                  },
+                                ]}
+                                editable={availabilityValue === "Carried"}
+                                value={
+                                  skuValues.oos?.[version]?.[
+                                    skuKey
+                                  ]?.toString() || ""
+                                }
+                                onChangeText={(text) => {
+                                  const onlyDigits = text.replace(
+                                    /[^0-9]/g,
+                                    ""
+                                  );
+                                  setSkuValues((prev: any) => ({
+                                    ...prev,
+                                    oos: {
+                                      ...prev.oos,
+                                      [version]: {
+                                        ...prev.oos?.[version],
+                                        [skuKey]: onlyDigits,
+                                      },
                                     },
-                                  ]}
-                                  keyboardType="numeric"
-                                  editable={availabilityValue === "Carried"}
-                                  value={
-                                    skuValues.ending?.[version]?.[skuKey] || ""
-                                  }
-                                  onChangeText={(text) => {
-                                    if (/^\d*$/.test(text)) {
-                                      setSkuValues((prev: any) => ({
-                                        ...prev,
-                                        ending: {
-                                          ...(prev.ending || {}),
-                                          [version]: {
-                                            ...(prev.ending?.[version] || {}),
-                                            [skuKey]: text,
-                                          },
-                                        },
-                                      }));
-                                    }
-                                  }}
-                                />
-                              </View>
-                            );
-                          })}
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })()}
+                                  }));
+                                }}
+                              />
+                            </View>
+                          );
+                        })}
+                      </TouchableOpacity>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
 
-              <View style={{ marginVertical: 10 }}>
+            {version === "MVP" && (
+              <TouchableOpacity
+                activeOpacity={1}
+                style={{ marginVertical: 10 }}
+              >
                 <TouchableOpacity
                   style={styles.expandButton}
                   onPress={() =>
                     setExpandedSection((prev) =>
-                      prev === "Offtake" ? null : "Offtake"
+                      prev === "Harvest" ? null : "Harvest"
                     )
                   }
                 >
                   <Text style={styles.expandButtonText}>
-                    {expandedSection === "Offtake"
-                      ? `Hide Offtake`
-                      : `Expand Offtake`}
+                    {expandedSection === "Harvest"
+                      ? `Hide Harvest`
+                      : `Expand Harvest`}
                   </Text>
                 </TouchableOpacity>
 
-                {expandedSection === "Offtake" && (
-                  <TouchableOpacity
-                    style={{ marginTop: 10 }}
-                    activeOpacity={1}
-                    onPress={() => {}}
-                  >
-                    {filteredSkuOptions.map((skuItem) => {
-                      const value = Number(
-                        skuValues.offtake?.[version]?.[skuItem.value] || 0
-                      );
+                {expandedSection === "Harvest" && (
+                  <View style={{ marginTop: 10 }}>
+                    {skuData[version]?.map((skuItem) => {
+                      let harvestEntries =
+                        skuValues.harvest?.[version]?.[skuItem.value] || [];
 
-                      const isNegative = value < 0;
+                      // 🟢 Ensure there are always 6 rows
+                      if (harvestEntries.length < 6) {
+                        harvestEntries = [
+                          ...harvestEntries,
+                          ...Array.from(
+                            { length: 6 - harvestEntries.length },
+                            () => ({
+                              date: "",
+                              quantity: "",
+                            })
+                          ),
+                        ];
+                      }
 
                       return (
-                        <View key={skuItem.value} style={styles.skuItemRow}>
-                          <Text style={styles.skuText}>{skuItem.label}</Text>
-                          <TextInput
-                            placeholder="Offtake"
-                            style={[
-                              styles.inputBox,
-                              isNegative && {
-                                borderColor: "red",
-                                borderWidth: 2,
-                                color: "red",
-                              },
-                            ]}
-                            editable={false}
-                            value={value === 0 ? "" : String(value)}
-                          />
+                        <View key={skuItem.value} style={{ marginBottom: 20 }}>
+                          <Text style={[styles.skuText, { marginBottom: 6 }]}>
+                            {skuItem.label}
+                          </Text>
+
+                          {(() => {
+                            const skuKey = skuItem.value;
+                            const availabilityValue =
+                              availability[version]?.[skuKey] || "Carried"; // 🟢 Add this line
+
+                            return harvestEntries.map(
+                              (
+                                entry: {
+                                  date: string;
+                                  quantity: string | number;
+                                },
+                                index: number
+                              ) => (
+                                <View
+                                  key={`${skuItem.value}-${index}`}
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    marginBottom: 8,
+                                  }}
+                                >
+                                  {/* Date Picker */}
+                                  <View
+                                    style={{ flex: 3, marginHorizontal: 8 }}
+                                  >
+                                    <TouchableOpacity
+                                      style={{
+                                        borderWidth: 1,
+                                        borderColor:
+                                          availabilityValue === "Carried"
+                                            ? "#844515"
+                                            : "#ccc",
+                                        borderRadius: 4,
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        backgroundColor:
+                                          availabilityValue === "Carried"
+                                            ? "#fff"
+                                            : "#f0f0f0",
+                                      }}
+                                      onPress={() => {
+                                        if (availabilityValue === "Carried") {
+                                          setShowDatePicker({
+                                            skuKey: skuItem.value,
+                                            index,
+                                          });
+                                        }
+                                      }}
+                                      disabled={availabilityValue !== "Carried"}
+                                    >
+                                      <Text
+                                        style={{
+                                          fontSize: 14,
+                                          color:
+                                            availabilityValue === "Carried"
+                                              ? "#000"
+                                              : "#888",
+                                        }}
+                                      >
+                                        {entry.date
+                                          ? new Date(
+                                              entry.date
+                                            ).toLocaleDateString("en-PH")
+                                          : "Select Expiry Date"}
+                                      </Text>
+                                    </TouchableOpacity>
+
+                                    {showDatePicker?.skuKey === skuItem.value &&
+                                      showDatePicker?.index === index &&
+                                      availabilityValue === "Carried" && (
+                                        <DateTimePicker
+                                          value={
+                                            entry.date
+                                              ? new Date(entry.date)
+                                              : new Date()
+                                          }
+                                          mode="date"
+                                          display="default"
+                                          onChange={(event, selectedDate) => {
+                                            if (
+                                              event.type === "set" &&
+                                              selectedDate
+                                            ) {
+                                              handleHarvestEntryChange(
+                                                skuItem.value,
+                                                index,
+                                                "date",
+                                                selectedDate.toISOString()
+                                              );
+                                            }
+                                            setShowDatePicker(null);
+                                          }}
+                                        />
+                                      )}
+                                  </View>
+
+                                  {/* Quantity Field */}
+                                  <TextInput
+                                    placeholder="Qty"
+                                    placeholderTextColor={"grey"}
+                                    editable={availabilityValue === "Carried"}
+                                    style={[
+                                      styles.inputBox,
+                                      {
+                                        flex: 2,
+                                        height: 40,
+                                        fontSize: 14,
+                                        backgroundColor:
+                                          availabilityValue === "Carried"
+                                            ? "#fff"
+                                            : "#f0f0f0",
+                                        borderColor:
+                                          availabilityValue === "Carried"
+                                            ? "#844515"
+                                            : "#ccc",
+                                        borderWidth: 1,
+                                        color:
+                                          availabilityValue === "Carried"
+                                            ? "#000"
+                                            : "#888",
+                                        marginLeft: 10,
+                                      },
+                                    ]}
+                                    keyboardType="numeric"
+                                    value={entry.quantity?.toString() || ""}
+                                    onChangeText={(text) => {
+                                      if (!entry.date) {
+                                        Alert.alert(
+                                          "Please select a date first."
+                                        );
+                                        return;
+                                      }
+                                      if (/^\d*$/.test(text)) {
+                                        handleHarvestEntryChange(
+                                          skuItem.value,
+                                          index,
+                                          "quantity",
+                                          text
+                                        );
+                                      }
+                                    }}
+                                  />
+                                </View>
+                              )
+                            );
+                          })()}
                         </View>
                       );
                     })}
-                  </TouchableOpacity>
+                  </View>
                 )}
-              </View>
+              </TouchableOpacity>
+            )}
 
-              <View style={{ marginVertical: 10 }}>
-                {/* OOS Section */}
-                {(() => {
-                  const section = "No. of Days OOS";
-                  const sectionKey = "oos";
-
-                  const filledCount = (skuData[version] || []).filter(
-                    (skuItem) => {
-                      const skuKey = skuItem.value;
-                      const val = skuValues[sectionKey]?.[version]?.[skuKey];
-                      const availStatus = availability[version]?.[skuKey];
-
-                      return (
-                        (val !== undefined && val !== "") ||
-                        availStatus === "Not Carried" ||
-                        availStatus === "Delisted"
-                      );
-                    }
-                  ).length;
-
-                  const totalSkuCount = (skuData[version] || []).length;
-
-                  return (
-                    <>
-                      <TouchableOpacity
-                        style={styles.expandButton}
-                        onPress={() =>
-                          setExpandedSection((prev) =>
-                            prev === section ? null : section
-                          )
-                        }
-                      >
-                        <Text style={styles.expandButtonText}>
-                          {expandedSection === section
-                            ? `Hide No. of Days OOS ${filledCount}/${totalSkuCount}`
-                            : `Expand No. of Days OOS ${filledCount}/${totalSkuCount}`}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {expandedSection === section && (
-                        <View style={{ marginTop: 10 }}>
-                          {(skuData[version] || []).map((skuItem) => {
-                            const skuKey = skuItem.value;
-                            const availabilityValue =
-                              availability[version]?.[skuKey] || "Carried";
-
-                            return (
-                              <View
-                                key={`${version}-${skuKey}`}
-                                style={styles.skuItemRow}
-                              >
-                                <Text style={styles.skuText}>
-                                  {skuItem.label}
-                                </Text>
-
-                                <TextInput
-                                  placeholderTextColor="#222021"
-                                  keyboardType="numeric"
-                                  style={[
-                                    styles.inputBox,
-                                    {
-                                      backgroundColor:
-                                        availabilityValue === "Carried"
-                                          ? "#fff"
-                                          : "#f0f0f0",
-                                      borderColor:
-                                        availabilityValue === "Carried"
-                                          ? "#844515"
-                                          : "#ccc",
-                                      borderWidth: 1,
-                                      height: 40,
-                                      fontSize: 14,
-                                      marginLeft: 10,
-                                      color: "#000",
-                                    },
-                                  ]}
-                                  editable={availabilityValue === "Carried"}
-                                  value={
-                                    skuValues.oos?.[version]?.[
-                                      skuKey
-                                    ]?.toString() || ""
-                                  }
-                                  onChangeText={(text) => {
-                                    const onlyDigits = text.replace(
-                                      /[^0-9]/g,
-                                      ""
-                                    );
-                                    setSkuValues((prev: any) => ({
-                                      ...prev,
-                                      oos: {
-                                        ...prev.oos,
-                                        [version]: {
-                                          ...prev.oos?.[version],
-                                          [skuKey]: onlyDigits,
-                                        },
-                                      },
-                                    }));
-                                  }}
-                                />
-                              </View>
-                            );
-                          })}
-                        </View>
-                      )}
-                    </>
-                  );
-                })()}
-              </View>
-
-              <View style={{ marginVertical: 10 }}>
+            {(version === "DAIRY" || version === "ICECREAM") && (
+              <TouchableOpacity
+                activeOpacity={1}
+                style={{ marginVertical: 10 }}
+              >
                 {(() => {
                   const section = "Expiry";
                   const sectionKey = "expiry";
@@ -2373,8 +2429,8 @@ const InventoryProcess = () => {
                       >
                         <Text style={styles.expandButtonText}>
                           {expandedSection === section
-                            ? `Hide Expiry ${filledCount}/${totalSkuCount}`
-                            : `Expand Expiry ${filledCount}/${totalSkuCount}`}
+                            ? `Hide Near to Expired ${filledCount}/${totalSkuCount}`
+                            : `Expand Near to Expired ${filledCount}/${totalSkuCount}`}
                         </Text>
                       </TouchableOpacity>
 
@@ -2382,30 +2438,30 @@ const InventoryProcess = () => {
                         <View style={{ marginTop: 10 }}>
                           {skuData[version]?.map((skuItem) => {
                             const skuKey = skuItem.value;
-
                             const availabilityValue =
                               availability[version]?.[skuKey] || "Carried";
 
-                            let ExpiryEntries =
+                            let expiryEntries =
                               skuValues.expiry?.[version]?.[skuKey] || [];
 
-                            if (
-                              availabilityValue === "Not Carried" ||
-                              availabilityValue === "Delisted"
-                            ) {
-                              // Clear expiry if SKU is not carried or delisted
-                              ExpiryEntries = [{ date: "", quantity: "" }];
-
-                              // Optionally, update the state to reflect this clearing
-                              skuValues.expiry[version][skuKey] = ExpiryEntries;
-                            } else if (ExpiryEntries.length === 0) {
-                              ExpiryEntries.push({ date: "", quantity: "" });
+                            // 🟢 Always enforce 6 rows
+                            if (expiryEntries.length < 6) {
+                              expiryEntries = [
+                                ...expiryEntries,
+                                ...Array.from(
+                                  { length: 6 - expiryEntries.length },
+                                  () => ({
+                                    date: "",
+                                    quantity: "",
+                                  })
+                                ),
+                              ];
                             }
 
                             return (
                               <View
                                 key={skuItem.value}
-                                style={{ marginBottom: 16 }}
+                                style={{ marginBottom: 20 }}
                               >
                                 <Text
                                   style={[styles.skuText, { marginBottom: 6 }]}
@@ -2413,7 +2469,7 @@ const InventoryProcess = () => {
                                   {skuItem.label}
                                 </Text>
 
-                                {ExpiryEntries.map(
+                                {expiryEntries.map(
                                   (
                                     entry: {
                                       date: string;
@@ -2431,10 +2487,7 @@ const InventoryProcess = () => {
                                     >
                                       {/* Date Picker */}
                                       <View
-                                        style={{
-                                          flex: 3,
-                                          marginHorizontal: 8,
-                                        }}
+                                        style={{ flex: 3, marginHorizontal: 8 }}
                                       >
                                         <TouchableOpacity
                                           style={{
@@ -2463,7 +2516,7 @@ const InventoryProcess = () => {
                                           }}
                                           disabled={
                                             availabilityValue !== "Carried"
-                                          } // Disable if not carried
+                                          }
                                         >
                                           <Text
                                             style={{
@@ -2478,7 +2531,7 @@ const InventoryProcess = () => {
                                               ? new Date(
                                                   entry.date
                                                 ).toLocaleDateString("en-PH")
-                                              : "Select Date"}
+                                              : "Select Expiry Date"}
                                           </Text>
                                         </TouchableOpacity>
 
@@ -2516,15 +2569,20 @@ const InventoryProcess = () => {
                                       </View>
 
                                       {/* Quantity Input */}
+
                                       <TextInput
                                         placeholder="Qty"
                                         placeholderTextColor={"grey"}
                                         editable={
                                           availabilityValue === "Carried"
-                                        } // Disable input if not carried
+                                        }
                                         style={[
                                           styles.inputBox,
                                           {
+                                            flex: 2,
+                                            height: 40,
+                                            fontSize: 14,
+                                            marginLeft: 10,
                                             backgroundColor:
                                               availabilityValue === "Carried"
                                                 ? "#fff"
@@ -2534,9 +2592,6 @@ const InventoryProcess = () => {
                                                 ? "#844515"
                                                 : "#ccc",
                                             borderWidth: 1,
-                                            height: 40,
-                                            fontSize: 14,
-                                            marginLeft: 10,
                                             color:
                                               availabilityValue === "Carried"
                                                 ? "#000"
@@ -2552,7 +2607,6 @@ const InventoryProcess = () => {
                                             );
                                             return;
                                           }
-
                                           if (/^\d*$/.test(text)) {
                                             handleExpiryEntryChange(
                                               skuItem.value,
@@ -2566,58 +2620,6 @@ const InventoryProcess = () => {
                                     </View>
                                   )
                                 )}
-
-                                <View
-                                  style={{
-                                    flexDirection: "row",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    marginTop: 4,
-                                    paddingHorizontal: 4,
-                                  }}
-                                >
-                                  <TouchableOpacity
-                                    onPress={() =>
-                                      addExpiryEntry(skuItem.value)
-                                    }
-                                    style={{
-                                      flexDirection: "row",
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 18 }}>➕</Text>
-                                    <Text
-                                      style={{
-                                        color: "#844515",
-                                        fontSize: 14,
-                                        marginLeft: 4,
-                                      }}
-                                    >
-                                      Add Entry
-                                    </Text>
-                                  </TouchableOpacity>
-
-                                  <TouchableOpacity
-                                    onPress={() =>
-                                      deleteExpiryEntry(skuItem.value, 0)
-                                    }
-                                    style={{
-                                      flexDirection: "row",
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    <Text style={{ fontSize: 18 }}>🗑️</Text>
-                                    <Text
-                                      style={{
-                                        color: "crimson",
-                                        fontSize: 14,
-                                        marginLeft: 4,
-                                      }}
-                                    >
-                                      Delete Entry
-                                    </Text>
-                                  </TouchableOpacity>
-                                </View>
                               </View>
                             );
                           })}
@@ -2626,9 +2628,11 @@ const InventoryProcess = () => {
                     </>
                   );
                 })()}
-              </View>
-            </View>
-          )}
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* )} */}
 
           <View style={[styles.buttonRow, { justifyContent: "space-between" }]}>
             <TouchableOpacity

@@ -5,7 +5,9 @@ import moment from "moment";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Button,
   Keyboard,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
@@ -16,7 +18,6 @@ import {
   View,
 } from "react-native";
 import DropDownPicker from "react-native-dropdown-picker";
-import DateTimePickerModal from "react-native-modal-datetime-picker";
 import styles from "./Style";
 
 const LabeledInput = ({ label, value, onChangeText, keyboardType }: any) => (
@@ -31,29 +32,46 @@ const LabeledInput = ({ label, value, onChangeText, keyboardType }: any) => (
   </View>
 );
 const buildSkuData = (prev: any) => ({
-  DAIRY: (prev.versions?.DAIRY?.Carried || []).map((sku: any) => ({
-    label: sku.sku,
-    value: sku.skuCode,
+  DAIRY: [
+    ...(prev.versions?.DAIRY?.Carried || []),
+    ...(prev.versions?.DAIRY?.["Not Carried"] || []),
+  ].map((sku: any) => ({
+    label: sku.sku || sku.label,
+    value: sku.skuCode || sku.value,
     expiry: sku.expiry || [],
-    beginningPCS: sku.beginningPCS?.toString() || "0", // 👈 use carried-over beginning
+    // ✅ use endingPCS from previous week as beginningPCS
+    beginningPCS: sku.endingPCS?.toString() || "0",
   })),
-  ICECREAM: (prev.versions?.ICECREAM?.Carried || []).map((sku: any) => ({
-    label: sku.sku,
-    value: sku.skuCode,
+
+  ICECREAM: [
+    ...(prev.versions?.ICECREAM?.Carried || []),
+    ...(prev.versions?.ICECREAM?.["Not Carried"] || []),
+  ].map((sku: any) => ({
+    label: sku.sku || sku.label,
+    value: sku.skuCode || sku.value,
     expiry: sku.expiry || [],
-    beginningPCS: sku.beginningPCS?.toString() || "0",
+    // ✅ use endingPCS from previous week as beginningPCS
+    beginningPCS: sku.endingPCS?.toString() || "0",
   })),
-  MVP: (prev.versions?.MVP?.Carried || []).map((sku: any) => ({
+
+  MVP: [
+    ...(prev.versions?.MVP?.Carried || []),
+    ...(prev.versions?.MVP?.["Not Carried"] || []),
+  ].map((sku: any) => ({
     label: sku?.sku || sku?.label || "Unknown SKU",
     value: sku?.skuCode || sku?.value || Math.random().toString(),
+    // ✅ now also use endingPCS from previous week as beginningPCS
+    beginningPCS: sku.endingPCS?.toString() || "0",
     harvest: sku?.harvest || [],
   })),
 });
 
 export default function InventoryNextWeek() {
+  const [showAdjustment, setShowAdjustment] = useState(false);
   const route = useRoute();
   const [loading, setLoading] = useState(false);
   const { data } = route.params as { data: string };
+  const currentWeek = moment().isoWeek();
   const prevWeekData = JSON.parse(data);
   const navigation = useNavigation();
   const nextInfo = moment();
@@ -89,31 +107,32 @@ export default function InventoryNextWeek() {
     ["DAIRY", "ICECREAM", "MVP"].forEach((v) => {
       init[v] = {};
       (skuData[v] || []).forEach((sku: any) => {
+        const normalize = (val: any) =>
+          val === "NC" || val === undefined || val === null
+            ? ""
+            : val.toString();
+
         init[v][sku.value] = {
-          beginning: sku.beginningPCS || "0",
+          beginning: sku.beginningPCS === 0 ? "0" : normalize(sku.beginningPCS), // don't fallback to "0"
           delivery: "",
           rtv: "",
           ending: "",
           offtake: "",
           oos: "",
           expiry: [{ month: "", quantity: "" }],
-
           harvest: sku.harvest?.length
             ? sku.harvest
             : [{ date: "", quantity: "" }],
-          // 👇 New fields
           avgOfftake: (() => {
             const skuPrev = prevWeekData?.versions?.[v]?.Carried?.find(
               (p: any) => p.skuCode === sku.value
             );
             if (!skuPrev) return "0";
 
-            // ✅ Use the running average already computed by carryOverSkus
             if (skuPrev.avgOfftake != null) {
               return skuPrev.avgOfftake.toString();
             }
 
-            // fallback: compute from stock movement if no avg stored yet
             const beginning = parseFloat(skuPrev.beginningPCS || "0");
             const delivery = parseFloat(skuPrev.deliveryPCS || "0");
             const rtv = parseFloat(skuPrev.rtvPCS || "0");
@@ -122,7 +141,6 @@ export default function InventoryNextWeek() {
 
             return calcOfftake.toString();
           })(),
-
           soInput: "",
         };
       });
@@ -132,7 +150,8 @@ export default function InventoryNextWeek() {
 
   const [version, setVersion] = useState("");
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
-
+  const [showCarryPrompt, setShowCarryPrompt] = useState<string | null>(null);
+  const [tempCarriedSelection, setTempCarriedSelection] = useState<any>({});
   const fields = [
     { key: "beginning", label: "Beginning PCS" },
     { key: "delivery", label: "Delivery PCS" },
@@ -141,81 +160,109 @@ export default function InventoryNextWeek() {
     { key: "ending", label: "Ending PCS" },
     { key: "offtake", label: "Offtake" },
     { key: "oos", label: "No. of Days OOS" },
-    { key: "expiry", label: "Expiry" },
+    { key: "expiry", label: "Near to Expired" },
     { key: "suggestOrder", label: "Suggest Order" },
   ];
-
   const handleChange = (fieldKey: string, skuKey: string, value: any) => {
     setSkuValues((prev: any) => {
-      const updated = {
+      const prevSku = prev[version]?.[skuKey] || {};
+
+      const numericFields = new Set([
+        "beginningPCS",
+        "deliveryPCS",
+        "rtvPCS",
+        "endingPCS",
+        "adjustPlus",
+        "adjustMinus",
+      ]);
+
+      // normalize value
+      let storeValue: any = value;
+      if (numericFields.has(fieldKey)) {
+        if (value === "" || value === null || value === undefined) {
+          storeValue = "";
+        } else {
+          const cleaned = String(value).replace(/\D/g, "");
+          storeValue = cleaned === "" ? "" : parseInt(cleaned, 10);
+        }
+      }
+
+      const merged: any = {
+        ...prevSku,
+        [fieldKey]: storeValue,
+      };
+
+      // recalc offtake + totals
+      if (numericFields.has(fieldKey)) {
+        const b = Number(merged.beginningPCS || 0);
+        const d = Number(merged.deliveryPCS || 0);
+        const r = Number(merged.rtvPCS || 0);
+        const e = Number(merged.endingPCS || 0);
+        const ap = Number(merged.adjustPlus || 0);
+        const am = Number(merged.adjustMinus || 0);
+
+        const thisOfftake = b + d - r - e + ap - am;
+        merged.offtake = thisOfftake;
+
+        const prevTotal = Number(prevSku.totalOfftake || 0);
+        const denom = Number(prevWeekData?.usageCount || 1); // <-- backend usageCount
+
+        const liveTotal =
+          prevTotal - Number(prevSku.offtake || 0) + thisOfftake;
+        merged.totalOfftake = liveTotal;
+        merged.usageCount = denom; // mirror backend, no +1 here
+        merged.avgOfftake =
+          denom > 0 ? Math.round((liveTotal / denom) * 100) / 100 : 0;
+      }
+
+      return {
         ...prev,
         [version]: {
           ...prev[version],
-          [skuKey]: {
-            ...prev[version][skuKey],
-            [fieldKey]: value,
-          },
+          [skuKey]: merged,
         },
       };
-
-      if (
-        ["beginningPCS", "deliveryPCS", "rtvPCS", "endingPCS"].includes(
-          fieldKey
-        )
-      ) {
-        const b = Number(updated[version][skuKey].beginningPCS || 0);
-        const d = Number(updated[version][skuKey].deliveryPCS || 0);
-        const r = Number(updated[version][skuKey].rtvPCS || 0);
-        const e = Number(updated[version][skuKey].endingPCS || 0);
-
-        // live offtake for THIS week
-        const thisOfftake = b + d - r - e;
-        updated[version][skuKey].offtake = thisOfftake;
-
-        // pull history
-        const prevSku =
-          prevWeekData?.versions?.[version]?.Carried?.find(
-            (p: any) => p.skuCode === skuKey
-          ) || null;
-
-        // 🔑 Use CURRENT totals if they exist, not only prevWeekData
-        const prevTotal =
-          Number(updated[version][skuKey].totalOfftake || 0) -
-          Number(updated[version][skuKey].offtake || 0); // subtract this week's old offtake
-
-        const prevWeeks = Number(updated[version][skuKey].weeksCount || 0) - 1; // remove this week if already counted
-
-        // live totals with new inputs
-        const liveTotal = prevTotal + thisOfftake;
-        const liveWeeks = prevWeeks + 1;
-
-        updated[version][skuKey].totalOfftake = liveTotal;
-        updated[version][skuKey].weeksCount = liveWeeks;
-
-        updated[version][skuKey].avgOfftake =
-          liveWeeks > 0 ? Number((liveTotal / liveWeeks).toFixed(2)) : 0;
-      }
-
-      return updated;
     });
   };
 
+  // For MVP Harvest
   const handleHarvestEntryChange = (
     skuKey: string,
-    idx: number,
+    index: number,
     field: "date" | "quantity",
     value: string
   ) => {
     setSkuValues((prev: any) => {
       const copy = { ...prev };
-
       if (!copy.MVP) copy.MVP = {};
-      if (!copy.MVP[skuKey]) copy.MVP[skuKey] = { harvest: [] };
+      if (!copy.MVP[skuKey]) copy.MVP[skuKey] = {};
       if (!copy.MVP[skuKey].harvest) copy.MVP[skuKey].harvest = [];
 
-      const harvest = [...copy.MVP[skuKey].harvest];
-      harvest[idx] = { ...harvest[idx], [field]: value };
-      copy.MVP[skuKey].harvest = harvest;
+      const updated = [...copy.MVP[skuKey].harvest];
+      updated[index] = { ...updated[index], [field]: value };
+      copy.MVP[skuKey].harvest = updated;
+
+      return copy;
+    });
+  };
+
+  // For DAIRY/ICECREAM Expiry
+  const handleExpiryEntryChange = (
+    version: "DAIRY" | "ICECREAM",
+    skuKey: string,
+    index: number,
+    field: "date" | "quantity",
+    value: string
+  ) => {
+    setSkuValues((prev: any) => {
+      const copy = { ...prev };
+      if (!copy[version]) copy[version] = {};
+      if (!copy[version][skuKey]) copy[version][skuKey] = {};
+      if (!copy[version][skuKey].expiry) copy[version][skuKey].expiry = [];
+
+      const updated = [...copy[version][skuKey].expiry];
+      updated[index] = { ...updated[index], [field]: value };
+      copy[version][skuKey].expiry = updated;
 
       return copy;
     });
@@ -227,18 +274,18 @@ export default function InventoryNextWeek() {
     const newOfftake: any = {};
 
     (skuData[version] || []).forEach((skuItem: any) => {
-      const beginning = parseFloat(
-        skuValues[version]?.[skuItem.value]?.beginning || "0"
-      );
-      const delivery = parseFloat(
-        skuValues[version]?.[skuItem.value]?.delivery || "0"
-      );
-      const rtv = parseFloat(skuValues[version]?.[skuItem.value]?.rtv || "0");
-      const ending = parseFloat(
-        skuValues[version]?.[skuItem.value]?.ending || "0"
-      );
+      const sku = skuValues[version]?.[skuItem.value] || {};
 
-      const calculatedOfftake = beginning + delivery - rtv - ending;
+      const beginning = parseFloat(sku.beginning || "0");
+      const delivery = parseFloat(sku.delivery || "0");
+      const rtv = parseFloat(sku.rtv || "0");
+      const ending = parseFloat(sku.ending || "0");
+      const adjustPlus = parseFloat(sku.adjustPlus || "0");
+      const adjustMinus = parseFloat(sku.adjustMinus || "0");
+
+      // 🧮 Calculate base + adjustments
+      const calculatedOfftake =
+        beginning + delivery - rtv - ending + adjustPlus - adjustMinus;
 
       newOfftake[skuItem.value] = calculatedOfftake;
     });
@@ -253,14 +300,13 @@ export default function InventoryNextWeek() {
 
         updated[version][skuKey] = {
           ...updated[version][skuKey],
-          offtake: thisOfftake.toFixed(2), // ✅ always overwrite
-          // ❌ don’t stack avgOfftake here
+          offtake: thisOfftake.toFixed(2),
         };
       });
 
       return updated;
     });
-  }, [version, skuValues[version], skuData[version]]);
+  }, [version, skuData, JSON.stringify(skuValues[version])]);
 
   const handleDateConfirm = (date: Date) => {
     if (showDatePicker.skuKey && showDatePicker.idx !== null) {
@@ -293,32 +339,61 @@ export default function InventoryNextWeek() {
       day: "numeric",
     });
 
-  const mapCarried = (skuList: any[], skuValuesForCat: any) =>
+  // const toggleAvailability = (
+  //   version: string,
+  //   skuCode: string,
+  //   newStatus: string
+  // ) => {
+  //   const hasBeginning = !!skuValues[version]?.[skuCode]?.beginning;
+
+  //   if (newStatus === "Not Carried" && hasBeginning) {
+  //     Alert.alert(
+  //       "Cannot mark as Not Carried",
+  //       "This SKU already has beginning data."
+  //     );
+  //     return;
+  //   }
+
+  //   setAvailability((prev: any) => ({
+  //     ...prev,
+  //     [version]: {
+  //       ...prev[version],
+  //       [skuCode]: newStatus,
+  //     },
+  //   }));
+  // };
+
+  // ✅ your original carried mapper
+  const mapCarried = (skuList: any[], skuValuesForCat: any, version: string) =>
     skuList.map((sku: any) => {
       const vals = skuValuesForCat[sku.value] || {};
 
       return {
         sku: sku.label,
         skuCode: sku.value,
-
-        // 🔹 map correctly to schema fields
         beginningPCS: Number(vals.beginning || 0),
         deliveryPCS: Number(vals.delivery || 0),
         rtvPCS: Number(vals.rtv || 0),
         endingPCS: Number(vals.ending || 0),
-
         offtake: Number(vals.offtake || 0),
         oos: Number(vals.oos || 0),
         avgOfftake: Number(vals.avgOfftake || 0),
         soQty: Number(vals.soInput || 0),
         suggestedOrder: Number(vals.suggestedOrder || 0),
-
-        expiry: vals.expiry || [],
-        harvest: vals.harvest || [],
         rtvNo: vals.rtvNo || "",
         rtvReason: vals.rtvReason || "",
+        ...(version === "MVP"
+          ? { harvest: vals.harvest || [] }
+          : { expiry: vals.expiry || [] }),
       };
     });
+
+  // ✅ new helper for not carried
+  const prepareNotCarried = (skuList: any[]) =>
+    skuList.map((sku: any) => ({
+      sku: sku.label,
+      skuCode: sku.value,
+    }));
 
   useEffect(() => {
     const fetchPrev = async () => {
@@ -341,58 +416,66 @@ export default function InventoryNextWeek() {
     fetchPrev();
   }, [selectedOutlet]);
 
-  const validateInventory = (
-    skuData: any,
-    skuValues: any,
-    availability: any
-  ): {
-    complete: string[];
-    incomplete: string[];
-    details: { [version: string]: { [sku: string]: string[] } };
-  } => {
+  function validateInventory(skuData: any, skuValues: any, availability: any) {
     const complete: string[] = [];
     const incomplete: string[] = [];
-    const details: { [version: string]: { [sku: string]: string[] } } = {};
+    const details: Record<string, Record<string, string[]>> = {};
 
-    ["DAIRY", "ICECREAM", "MVP"].forEach((version) => {
-      const skuList = skuData[version] || [];
-      let versionComplete = true;
+    const isPresent = (v: any) => {
+      if (v === undefined || v === null) return false;
+      if (typeof v === "string") return v.trim() !== "";
+      return true; // numbers (including 0) and objects/arrays considered present
+    };
 
-      skuList.forEach((sku: any) => {
-        const key = sku.value;
-        const status = availability?.[version]?.[key];
+    const pick = (values: any, ...keys: string[]) => {
+      for (const k of keys) {
+        if (values?.[k] !== undefined && values?.[k] !== null) {
+          return values[k];
+        }
+      }
+      return undefined;
+    };
 
-        if (status === "Not Carried" || status === "Delisted") return;
+    Object.keys(skuData).forEach((version) => {
+      const versionSkus = skuData[version] || [];
 
-        const v = skuValues?.[version]?.[key] || {};
+      versionSkus.forEach((sku: any) => {
+        const values = skuValues[version]?.[sku.value] || {};
+        const currentAvailability =
+          availability[version]?.[sku.value] ?? "Carried";
         const missing: string[] = [];
 
-        // --- Required fields ---
-        if (!v.beginning && v.beginning !== 0) missing.push("Beginning");
-        if (!v.delivery && v.delivery !== 0) missing.push("Delivery");
-        if (!v.ending && v.ending !== 0) missing.push("Ending");
-
-        // --- Conditional: OOS required only if Ending == 0 ---
-        if (Number(v.ending) === 0 && (!v.oos || v.oos === "")) {
-          missing.push("No. of Days OOS");
+        // Skip validation if Not Carried or Delisted
+        if (
+          currentAvailability === "Not Carried" ||
+          currentAvailability === "Delisted"
+        ) {
+          if (!complete.includes(version)) complete.push(version);
+          return;
         }
+
+        // All versions (including MVP): require beginning, delivery, ending
+        const beginning = pick(values, "beginning", "beginningPCS");
+        const delivery = pick(values, "delivery", "deliveryPCS");
+        const ending = pick(values, "ending", "endingPCS");
+
+        if (!isPresent(beginning)) missing.push("beginning");
+        if (!isPresent(delivery)) missing.push("delivery");
+        if (!isPresent(ending)) missing.push("ending");
+        // harvest is now optional, so no check here
 
         if (missing.length > 0) {
-          versionComplete = false;
-          if (!details[version]) details[version] = {};
-          details[version][sku.label] = missing;
+          if (!incomplete.includes(version)) incomplete.push(version);
+          details[version] = details[version] || {};
+          details[version][sku.label || sku.value] = missing;
+        } else {
+          if (!complete.includes(version)) complete.push(version);
         }
       });
-
-      if (versionComplete) {
-        complete.push(version);
-      } else {
-        incomplete.push(version);
-      }
     });
 
     return { complete, incomplete, details };
-  };
+  }
 
   const handleSave = async () => {
     try {
@@ -417,54 +500,70 @@ export default function InventoryNextWeek() {
           `You have completed: ${complete.join(", ") || "None"}\n` +
             `Please complete:\n${message}`
         );
-        return; // ⛔ Stop if missing fields
+        return;
       }
 
-      // ✅ Prepare SKUs for payload
-      const prepareSkus = (skus: any[]) => {
-        return skus.map((sku: any) => {
-          const lastOfftake = Number(sku.offtake || 0);
-          const prevTotal = Number(sku.totalOfftake || 0);
-          const prevCount = Number(sku.weeksCount || 0);
+      const currentWeek = moment().isoWeek();
 
-          const newTotal = prevTotal + lastOfftake;
-          const newCount = prevCount + 1;
-          const newAvg = newCount > 0 ? newTotal / newCount : 0;
-
-          return {
-            ...sku,
-            code: sku.code || "",
-            totalOfftake: newTotal,
-            weeksCount: newCount,
-            avgOfftake: newAvg,
-            suggestedOrder: Math.max(0, newAvg - (sku.soQty || 0)),
-          };
-        });
-      };
-
-      const payload: any = {
+      const payload = {
         email,
         merchandiser,
         outlet: selectedOutlet,
+        week: currentWeek,
         date,
         versions: {
           DAIRY: {
-            Carried: prepareSkus(
-              mapCarried(skuData.DAIRY || [], skuValues.DAIRY)
+            Carried: mapCarried(
+              (skuData.DAIRY || []).filter(
+                (sku: any) =>
+                  (availability.DAIRY?.[sku.value] ?? "Carried") === "Carried"
+              ),
+              skuValues.DAIRY,
+              "DAIRY"
+            ),
+            "Not Carried": prepareNotCarried(
+              (skuData.DAIRY || []).filter(
+                (sku: any) => availability.DAIRY?.[sku.value] === "Not Carried"
+              )
             ),
           },
           ICECREAM: {
-            Carried: prepareSkus(
-              mapCarried(skuData.ICECREAM || [], skuValues.ICECREAM)
+            Carried: mapCarried(
+              (skuData.ICECREAM || []).filter(
+                (sku: any) =>
+                  (availability.ICECREAM?.[sku.value] ?? "Carried") ===
+                  "Carried"
+              ),
+              skuValues.ICECREAM,
+              "ICECREAM"
+            ),
+            "Not Carried": prepareNotCarried(
+              (skuData.ICECREAM || []).filter(
+                (sku: any) =>
+                  availability.ICECREAM?.[sku.value] === "Not Carried"
+              )
             ),
           },
           MVP: {
-            Carried: prepareSkus(mapCarried(skuData.MVP || [], skuValues.MVP)),
+            Carried: mapCarried(
+              (skuData.MVP || []).filter(
+                (sku: any) =>
+                  (availability.MVP?.[sku.value] ?? "Carried") === "Carried"
+              ),
+              skuValues.MVP,
+              "MVP"
+            ),
+            "Not Carried": prepareNotCarried(
+              (skuData.MVP || []).filter(
+                (sku: any) => availability.MVP?.[sku.value] === "Not Carried"
+              )
+            ),
           },
         },
       };
 
-      // 🔹 Save the NEXT week
+      console.log("🚀 payload", payload);
+
       const res = await fetch("https://api-carmens-best.bmphrc.com/saveNext", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -472,12 +571,9 @@ export default function InventoryNextWeek() {
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const result = await res.json();
 
-      if (result?.id) {
-        setPrevDocId(result.id); // keep track of the new doc
-      }
+      if (result?.id) setPrevDocId(result.id);
 
       Alert.alert("Success", "Next week inventory saved!");
       navigation.goBack();
@@ -487,32 +583,33 @@ export default function InventoryNextWeek() {
     }
   };
 
-  const isSkuComplete = (version: string, key: string): boolean => {
-    const avail = availability[version]?.[key];
+  const isSkuComplete = (version: string, skuKey: string): boolean => {
+    const avail = availability[version]?.[skuKey];
 
     // Auto complete if Not Carried / Delisted
     if (avail === "Not Carried" || avail === "Delisted") return true;
 
-    const sku = skuValues[version]?.[key] || {};
+    const sku = skuValues[version]?.[skuKey] || {};
 
-    if (version === "MVP") {
-      const harvestList = sku.harvest || [];
-      const isValidHarvest = harvestList.some(
-        (entry: { date?: string; quantity?: string | number }) =>
-          !!entry?.date &&
-          entry?.quantity !== "" &&
-          !isNaN(Number(entry.quantity)) &&
-          Number(entry.quantity) > 0
-      );
-      return isValidHarvest; // 🔑 no longer require oos
-    }
+    const isPresent = (v: any) => {
+      if (v === undefined || v === null) return false;
+      if (typeof v === "string") return v.trim() !== "";
+      return true;
+    };
 
-    if (version === "ICECREAM") {
-      return sku.beginning !== "" && sku.delivery !== "" && sku.ending !== "";
-    }
+    const pick = (obj: any, ...keys: string[]) => {
+      for (const k of keys) {
+        if (obj?.[k] !== undefined && obj?.[k] !== null) return obj[k];
+      }
+      return undefined;
+    };
 
-    if (version === "DAIRY") {
-      return sku.beginning !== "" && sku.delivery !== "" && sku.ending !== "";
+    if (version === "MVP" || version === "ICECREAM" || version === "DAIRY") {
+      const beginning = pick(sku, "beginning", "beginningPCS");
+      const delivery = pick(sku, "delivery", "deliveryPCS");
+      const ending = pick(sku, "ending", "endingPCS");
+
+      return isPresent(beginning) && isPresent(delivery) && isPresent(ending);
     }
 
     return false;
@@ -554,9 +651,7 @@ export default function InventoryNextWeek() {
         ]}
       >
         <View style={styles.appBarExpiry}>
-          <Text style={styles.appBarTitleInventoryprocess}>
-            INVENTORY NEXT WEEK
-          </Text>
+          <Text style={styles.appBarTitleInventoryprocess}>NEXT INVENTORY</Text>
         </View>
 
         <ScrollView
@@ -570,6 +665,12 @@ export default function InventoryNextWeek() {
           showsVerticalScrollIndicator
         >
           {/* Header Info */}
+          <LabeledInput
+            label="Week"
+            value={`Week ${currentWeek}`}
+            onChangeText={() => {}}
+            editable={false}
+          />
           <LabeledInput label="Date" value={date} onChangeText={() => {}} />
           {false && (
             <>
@@ -596,14 +697,127 @@ export default function InventoryNextWeek() {
             disabled
           />
 
+          {showCarryPrompt && (
+            <Modal
+              visible={!!showCarryPrompt}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowCarryPrompt(null)}
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContainerCategory}>
+                  <Text style={styles.modalTitle}>
+                    Select which SKUs are Carried
+                  </Text>
+
+                  <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
+                    {(skuData[showCarryPrompt] || [])
+                      .filter((skuItem: any) => {
+                        const key = skuItem.value;
+                        const prevWeekSku = prevWeekData?.versions?.[
+                          showCarryPrompt
+                        ]?.Carried?.find((p: any) => p.skuCode === key);
+                        // Only show those with no previous beginning
+                        return (
+                          !prevWeekSku ||
+                          prevWeekSku.beginningPCS == null ||
+                          prevWeekSku.beginningPCS === ""
+                        );
+                      })
+                      .map((skuItem: any) => {
+                        const key = skuItem.value;
+                        const isSelected = tempCarriedSelection?.[key] ?? false;
+
+                        return (
+                          <TouchableOpacity
+                            key={key}
+                            onPress={() => {
+                              setTempCarriedSelection((prev: any) => ({
+                                ...prev,
+                                [key]: !isSelected,
+                              }));
+                            }}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginVertical: 5,
+                            }}
+                          >
+                            <View
+                              style={{
+                                width: 20,
+                                height: 20,
+                                borderWidth: 1,
+                                borderColor: "#333",
+                                marginRight: 10,
+                                backgroundColor: isSelected
+                                  ? "#844515"
+                                  : "transparent",
+                              }}
+                            />
+                            <Text>{skuItem.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                  </ScrollView>
+
+                  <Button
+                    title="Save Selection"
+                    color="#844515"
+                    onPress={() => {
+                      const versionSkus = skuData[showCarryPrompt] || [];
+                      const updatedAvailability = { ...availability };
+
+                      versionSkus.forEach((skuItem: any) => {
+                        const key = skuItem.value;
+
+                        // Only set if no previous value
+                        const prevWeekSku = prevWeekData?.versions?.[
+                          showCarryPrompt
+                        ]?.Carried?.find((p: any) => p.skuCode === key);
+
+                        if (
+                          !prevWeekSku ||
+                          prevWeekSku.beginningPCS === "" ||
+                          prevWeekSku.beginningPCS == null
+                        ) {
+                          updatedAvailability[showCarryPrompt] = {
+                            ...updatedAvailability[showCarryPrompt],
+                            [key]: tempCarriedSelection?.[key]
+                              ? "Carried"
+                              : "Not Carried",
+                          };
+                        }
+                      });
+
+                      setAvailability(updatedAvailability);
+                      setTempCarriedSelection({});
+                      setShowCarryPrompt(null);
+                      setVersion(showCarryPrompt);
+                    }}
+                  />
+                </View>
+              </View>
+            </Modal>
+          )}
+
           <View style={styles.buttonRow}>
             {["DAIRY", "ICECREAM", "MVP"].map((v) => {
               const versionSkus = skuData[v] || [];
               const totalSkuCount = versionSkus.length;
 
-              const completedSkuCount = versionSkus.filter((skuItem: any) =>
-                isSkuComplete(v, skuItem.value)
-              ).length;
+              const completedSkuCount = versionSkus.filter((skuItem: any) => {
+                const key = skuItem.value;
+                const currentAvailability = availability[v]?.[key] ?? "Carried";
+
+                if (
+                  currentAvailability === "Not Carried" ||
+                  currentAvailability === "Delisted"
+                ) {
+                  return true;
+                }
+                return isSkuComplete(v, key);
+              }).length;
 
               return (
                 <TouchableOpacity
@@ -612,7 +826,16 @@ export default function InventoryNextWeek() {
                     styles.versionBtn,
                     version === v && styles.selectedButton,
                   ]}
-                  onPress={() => setVersion(v)}
+                  onPress={() => {
+                    // ✅ If availability not set yet, ask first
+                    const hasAnyAvailability =
+                      Object.keys(availability[v] || {}).length > 0;
+                    if (!hasAnyAvailability) {
+                      setShowCarryPrompt(v); // <-- trigger the modal prompt you showed earlier
+                    } else {
+                      setVersion(v); // already has data, just switch
+                    }
+                  }}
                 >
                   <Text
                     style={[styles.btnText, version === v && { color: "#fff" }]}
@@ -626,199 +849,60 @@ export default function InventoryNextWeek() {
 
           {/* Expandable Sections */}
           {version &&
-            (version === "MVP" ? (
-              // MVP Harvest Section Only
-              <View style={{ marginTop: 20 }}>
-                <TouchableOpacity
-                  style={styles.expandButton}
-                  onPress={() =>
-                    setExpandedSection((prev) =>
-                      prev === "Harvest" ? null : "Harvest"
-                    )
+            // ICECREAM / DAIRY flow
+            fields.map((field) => {
+              if (version === "MVP" && field.key === "expiry") return null;
+              const skus = skuData[version] || [];
+              const requiredFields = [
+                "beginning",
+                "delivery",
+                "rtv",
+                "ending",
+                "oos",
+              ];
+
+              // --- Default completed counter ---
+              let completed = 0;
+              let total = skus.length;
+
+              // Required fields (Beginning, Delivery, Ending )
+              if (requiredFields.includes(field.key)) {
+                skus.forEach((sku: any) => {
+                  const values = skuValues[version][sku.value] || {};
+                  const currentAvailability =
+                    availability[version]?.[sku.value] ?? "Carried";
+
+                  // ✅ If Not Carried → auto mark as complete
+                  if (currentAvailability === "Not Carried") {
+                    completed++;
+                    return;
                   }
-                >
-                  <Text style={styles.expandButtonText}>
-                    {expandedSection === "Harvest"
-                      ? `Hide Harvest`
-                      : `Expand Harvest`}
-                  </Text>
-                </TouchableOpacity>
 
-                {expandedSection === "Harvest" && (
-                  <View style={{ marginTop: 10 }}>
-                    {(skuData.MVP || []).map((skuItem: any) => {
-                      const harvestEntries = skuValues?.MVP?.[skuItem.value]
-                        ?.harvest || [{ date: "", quantity: "" }];
+                  const isComplete =
+                    values[field.key] &&
+                    values[field.key].toString().trim() !== "";
+                  if (isComplete) completed++;
+                });
+              }
 
-                      return (
-                        <View key={skuItem.value} style={{ marginBottom: 16 }}>
-                          <Text style={[styles.skuText, { marginBottom: 6 }]}>
-                            {skuItem.label}
-                          </Text>
+              // Expiry-specific counter (count per entry, not per SKU)
+              if (field.key === "expiry") {
+                completed = 0;
+                total = skus.reduce(
+                  (acc: number, sku: any) =>
+                    acc + (skuValues[version][sku.value]?.expiry?.length || 0),
+                  0
+                );
 
-                          {harvestEntries.map((entry: any, index: any) => (
-                            <View
-                              key={`${skuItem.value}-${index}`}
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                marginBottom: 8,
-                              }}
-                            >
-                              {/* Date Picker */}
-                              <View style={{ flex: 3, marginHorizontal: 8 }}>
-                                <TouchableOpacity
-                                  style={{
-                                    borderWidth: 1,
-                                    borderColor: "#ccc",
-                                    borderRadius: 4,
-                                    paddingVertical: 10,
-                                    paddingHorizontal: 12,
-                                  }}
-                                  onPress={() =>
-                                    setShowDatePicker({
-                                      visible: true,
-                                      skuKey: skuItem.value,
-                                      idx: index,
-                                    })
-                                  }
-                                >
-                                  <Text style={{ fontSize: 14 }}>
-                                    {entry.date
-                                      ? (() => {
-                                          const d = new Date(entry.date);
-                                          // format MM-DD-YYYY
-                                          return `${String(
-                                            d.getMonth() + 1
-                                          ).padStart(2, "0")}-${String(
-                                            d.getDate()
-                                          ).padStart(
-                                            2,
-                                            "0"
-                                          )}-${d.getFullYear()}`;
-                                        })()
-                                      : "Select Date"}
-                                  </Text>
-                                </TouchableOpacity>
+                skus.forEach((sku: any) => {
+                  const currentAvailability =
+                    availability[version]?.[sku.value] ?? "Carried";
+                  const isNotCarried = currentAvailability === "Not Carried";
 
-                                {showDatePicker?.skuKey === skuItem.value &&
-                                  showDatePicker?.idx === index && (
-                                    <DateTimePicker
-                                      value={
-                                        entry.date
-                                          ? new Date(entry.date)
-                                          : new Date()
-                                      }
-                                      mode="date"
-                                      display="default"
-                                      onChange={(event, selectedDate) => {
-                                        if (
-                                          event.type === "set" &&
-                                          selectedDate
-                                        ) {
-                                          // store ISO (safe) like "2025-08-27"
-                                          const iso = selectedDate
-                                            .toISOString()
-                                            .split("T")[0];
-                                          handleHarvestEntryChange(
-                                            skuItem.value,
-                                            index,
-                                            "date",
-                                            iso
-                                          );
-                                        }
-                                        setShowDatePicker({
-                                          visible: false,
-                                          skuKey: null,
-                                          idx: null,
-                                        });
-                                      }}
-                                    />
-                                  )}
-                              </View>
-
-                              {/* Quantity Field */}
-                              <TextInput
-                                placeholder="Qty"
-                                placeholderTextColor="grey"
-                                style={[
-                                  styles.inputBox,
-                                  {
-                                    flex: 2,
-                                    height: 40,
-                                    fontSize: 14,
-                                    backgroundColor: entry.date
-                                      ? "#fff"
-                                      : "#f0f0f0",
-                                    borderColor: entry.date
-                                      ? "#844515"
-                                      : "#ccc",
-                                    borderWidth: 1,
-                                  },
-                                ]}
-                                keyboardType="numeric"
-                                value={entry.quantity?.toString() || ""}
-                                onChangeText={(text) => {
-                                  if (!entry.date) {
-                                    Alert.alert("Please select a date first.");
-                                    return;
-                                  }
-                                  if (/^\d*$/.test(text)) {
-                                    handleHarvestEntryChange(
-                                      skuItem.value,
-                                      index,
-                                      "quantity",
-                                      text
-                                    );
-                                  }
-                                }}
-                              />
-                            </View>
-                          ))}
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            ) : (
-              // ICECREAM / DAIRY flow
-              fields.map((field) => {
-                const skus = skuData[version] || [];
-                const requiredFields = [
-                  "beginning",
-                  "delivery",
-                  "rtv",
-                  "ending",
-                  "oos",
-                ];
-
-                // --- Default completed counter ---
-                let completed = 0;
-                let total = skus.length;
-
-                // Required fields (Beginning, Delivery, RTV, Ending, OOS)
-                if (requiredFields.includes(field.key)) {
-                  skus.forEach((sku: any) => {
-                    const values = skuValues[version][sku.value] || {};
-                    const isComplete =
-                      values[field.key] &&
-                      values[field.key].toString().trim() !== "";
-                    if (isComplete) completed++;
-                  });
-                }
-
-                // Expiry-specific counter (count per entry, not per SKU)
-                if (field.key === "expiry") {
-                  completed = 0;
-                  total = skus.reduce(
-                    (acc: number, sku: any) =>
-                      acc +
-                      (skuValues[version][sku.value]?.expiry?.length || 0),
-                    0
-                  );
-
-                  skus.forEach((sku: any) => {
+                  if (isNotCarried) {
+                    // ✅ Auto mark as 1 completed for Not Carried
+                    completed += 1;
+                  } else {
                     const expiryList =
                       skuValues[version][sku.value]?.expiry || [];
                     expiryList.forEach((entry: any) => {
@@ -830,386 +914,537 @@ export default function InventoryNextWeek() {
                         completed++;
                       }
                     });
-                  });
-                }
+                  }
+                });
+              }
 
-                return (
-                  <View key={field.key} style={{ marginTop: 20 }}>
+              return (
+                <View key={field.key} style={{ marginTop: 20 }}>
+                  <TouchableOpacity
+                    style={styles.expandButton}
+                    onPress={() =>
+                      setExpandedSection((prev) =>
+                        prev === field.key ? null : field.key
+                      )
+                    }
+                  >
+                    <Text style={styles.expandButtonText}>
+                      {expandedSection === field.key
+                        ? `Hide ${field.label}${
+                            requiredFields.includes(field.key) ||
+                            field.key === "expiry"
+                              ? ` ${completed}/${total}`
+                              : ""
+                          }`
+                        : `Show ${field.label}${
+                            requiredFields.includes(field.key) ||
+                            field.key === "expiry"
+                              ? ` ${completed}/${total}`
+                              : ""
+                          }`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {expandedSection === field.key && (
                     <TouchableOpacity
-                      style={styles.expandButton}
-                      onPress={() =>
-                        setExpandedSection((prev) =>
-                          prev === field.key ? null : field.key
-                        )
-                      }
+                      activeOpacity={1}
+                      style={{ marginTop: 10 }}
                     >
-                      <Text style={styles.expandButtonText}>
-                        {expandedSection === field.key
-                          ? `Hide ${field.label}${
-                              requiredFields.includes(field.key) ||
-                              field.key === "expiry"
-                                ? ` ${completed}/${total}`
-                                : ""
-                            }`
-                          : `Show ${field.label}${
-                              requiredFields.includes(field.key) ||
-                              field.key === "expiry"
-                                ? ` ${completed}/${total}`
-                                : ""
-                            }`}
-                      </Text>
-                    </TouchableOpacity>
+                      {field.key === "expiry" ? (
+                        (skuData[version] || []).map((skuItem: any) => {
+                          const currentAvailability =
+                            availability?.[version]?.[skuItem.value] ??
+                            "Carried";
+                          const isNotCarried =
+                            currentAvailability === "Not Carried";
 
-                    {expandedSection === field.key && (
-                      <View style={{ marginTop: 10 }}>
-                        {field.key === "expiry" ? (
-                          (skuData[version] || []).map((sku: any) => {
-                            const expiryList = [
-                              ...skuValues[version][sku.value].expiry,
-                              ...Array(
-                                6 - skuValues[version][sku.value].expiry.length
-                              ).fill({
+                          const existing =
+                            skuValues?.[version]?.[skuItem.value]?.expiry || [];
+                          const expiryEntries = existing.concat(
+                            Array.from(
+                              { length: Math.max(0, 6 - existing.length) },
+                              () => ({
                                 date: "",
                                 quantity: "",
-                              }),
-                            ].slice(0, 6);
+                              })
+                            )
+                          );
+
+                          return (
+                            <View
+                              key={skuItem.value}
+                              style={{ marginBottom: 16 }}
+                            >
+                              {/* SKU Label */}
+                              <Text
+                                style={[styles.skuText, { marginBottom: 6 }]}
+                              >
+                                {skuItem.label}
+                              </Text>
+
+                              {expiryEntries.map(
+                                (entry: any, index: number) => (
+                                  <View
+                                    key={`${skuItem.value}-${index}`}
+                                    style={{
+                                      flexDirection: "row",
+                                      alignItems: "center",
+                                      marginBottom: 8,
+                                    }}
+                                  >
+                                    {/* Date Picker */}
+                                    <TouchableOpacity
+                                      disabled={isNotCarried}
+                                      style={{
+                                        flex: 3,
+                                        marginHorizontal: 8,
+                                        borderWidth: 1,
+                                        borderColor: "#ccc",
+                                        borderRadius: 4,
+                                        paddingVertical: 10,
+                                        paddingHorizontal: 12,
+                                        backgroundColor: isNotCarried
+                                          ? "#f0f0f0"
+                                          : "#fff",
+                                      }}
+                                      onPress={() => {
+                                        if (isNotCarried) return;
+                                        setShowDatePicker({
+                                          visible: true,
+                                          skuKey: skuItem.value,
+                                          idx: index,
+                                        });
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          fontSize: 14,
+                                          color: isNotCarried
+                                            ? "grey"
+                                            : "black",
+                                        }}
+                                      >
+                                        {entry.date
+                                          ? (() => {
+                                              const d = new Date(entry.date);
+                                              return `${String(
+                                                d.getMonth() + 1
+                                              ).padStart(2, "0")}-${String(
+                                                d.getDate()
+                                              ).padStart(
+                                                2,
+                                                "0"
+                                              )}-${d.getFullYear()}`;
+                                            })()
+                                          : "Select Date"}
+                                      </Text>
+                                    </TouchableOpacity>
+
+                                    {showDatePicker?.skuKey === skuItem.value &&
+                                      showDatePicker?.idx === index &&
+                                      !isNotCarried && (
+                                        <DateTimePicker
+                                          value={
+                                            entry.date
+                                              ? new Date(entry.date)
+                                              : new Date()
+                                          }
+                                          mode="date"
+                                          display="default"
+                                          onChange={(
+                                            event: any,
+                                            selectedDate?: Date
+                                          ) => {
+                                            if (
+                                              event.type === "set" &&
+                                              selectedDate
+                                            ) {
+                                              const iso = selectedDate
+                                                .toISOString()
+                                                .split("T")[0];
+                                              handleExpiryEntryChange(
+                                                version as "DAIRY" | "ICECREAM", // 👈 pass ICECREAM or DAIRY
+                                                skuItem.value,
+                                                index,
+                                                "date",
+                                                iso
+                                              );
+                                            }
+                                            setShowDatePicker({
+                                              visible: false,
+                                              skuKey: null,
+                                              idx: null,
+                                            });
+                                          }}
+                                        />
+                                      )}
+
+                                    {/* Quantity Input */}
+                                    <TextInput
+                                      placeholder="Qty"
+                                      placeholderTextColor="grey"
+                                      style={[
+                                        styles.inputBox,
+                                        {
+                                          flex: 2,
+                                          height: 40,
+                                          fontSize: 14,
+                                          textAlign: "center",
+                                          backgroundColor: isNotCarried
+                                            ? "#f0f0f0"
+                                            : entry.date
+                                            ? "#fff"
+                                            : "#f9f9f9",
+                                          borderColor: isNotCarried
+                                            ? "#ccc"
+                                            : "#844515",
+                                          borderWidth: 1,
+                                          color: isNotCarried
+                                            ? "grey"
+                                            : "black",
+                                        },
+                                      ]}
+                                      keyboardType="numeric"
+                                      editable={!isNotCarried && !!entry.date}
+                                      value={entry.quantity?.toString() || ""}
+                                      onChangeText={(text: string) => {
+                                        if (isNotCarried) return;
+                                        if (!entry.date) {
+                                          Alert.alert(
+                                            "Please select a date first."
+                                          );
+                                          return;
+                                        }
+                                        if (/^\d*$/.test(text)) {
+                                          handleExpiryEntryChange(
+                                            version as "DAIRY" | "ICECREAM", // 👈 pass ICECREAM or DAIRY
+                                            skuItem.value,
+                                            index,
+                                            "quantity",
+                                            text
+                                          );
+                                        }
+                                      }}
+                                    />
+                                  </View>
+                                )
+                              )}
+                            </View>
+                          );
+                        })
+                      ) : field.key === "rtvNo" ? (
+                        // --- RTV No is single field ---
+                        <View style={{ marginVertical: 10 }}>
+                          {/* <Text
+                              style={{ fontWeight: "bold", marginBottom: 5 }}
+                            >
+                              RTV No
+                            </Text> */}
+                          <TextInput
+                            style={[
+                              styles.input,
+                              {
+                                width: "100%",
+                                height: 50,
+                                marginLeft: 6,
+                                textAlign: "center",
+                                backgroundColor: "#f0f0f0",
+                                borderRadius: 8,
+                                borderColor: "#844515",
+                                borderWidth: 1,
+                                paddingHorizontal: 15,
+                                marginBottom: 20,
+                                color: "black",
+                              },
+                            ]}
+                            placeholder="Enter RTV No"
+                            placeholderTextColor="#000000ff"
+                            value={rtvNo}
+                            onChangeText={setRtvNo}
+                          />
+                        </View>
+                      ) : field.key === "suggestOrder" ? (
+                        <View style={{ marginTop: 10 }}>
+                          {(skuData[version] || []).map((sku: any) => {
+                            const carried = skuValues[version][sku.value] || {};
+
+                            const beginning = Number(carried?.beginning || 0);
+                            const delivery = Number(carried?.delivery || 0);
+                            const rtv = Number(carried?.rtv || 0);
+                            const ending = Number(carried?.ending || 0);
+
+                            // live offtake from current inputs
+                            const currentOfftake =
+                              beginning + delivery - rtv - ending;
+
+                            // backend values from last week
+                            const prevSku = prevWeekData?.versions?.[
+                              version
+                            ]?.Carried?.find(
+                              (p: any) => p.skuCode === sku.value
+                            );
+                            const prevTotal = Number(
+                              prevSku?.totalOfftake || 0
+                            );
+                            const prevCount = Number(
+                              prevWeekData?.usageCount || 1
+                            );
+
+                            // recompute totals live
+                            let newTotal = prevTotal + currentOfftake;
+                            let newCount = prevCount;
+
+                            // reset rule after 180 days
+                            if (newCount > 180) {
+                              newTotal = currentOfftake;
+                              newCount = 1;
+                            }
+
+                            const avgOfftake =
+                              newCount > 0
+                                ? (newTotal / newCount).toFixed(2)
+                                : "0.00";
+
+                            const soInput = carried?.soInput?.toString() || "";
 
                             return (
                               <View
                                 key={sku.value}
                                 style={{
-                                  flexDirection: "row", // ⬅️ put SKU name + expiry side by side
-                                  alignItems: "flex-start",
-                                  marginBottom: 15,
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  marginBottom: 8,
                                 }}
                               >
-                                {/* SKU Name (left column) */}
-                                <Text
-                                  style={[
-                                    styles.skuText,
-                                    { width: 120, marginRight: 10 },
-                                  ]}
+                                {/* SKU Name */}
+                                <ScrollView
+                                  horizontal
+                                  style={{ flex: 1 }}
+                                  contentContainerStyle={{ paddingRight: 10 }}
+                                  scrollEnabled
                                 >
-                                  {sku.label}
-                                </Text>
+                                  <Text
+                                    style={styles.skuText}
+                                    numberOfLines={1}
+                                  >
+                                    {sku.label}
+                                  </Text>
+                                </ScrollView>
 
-                                {/* Expiry fields (right column) */}
-                                <View style={{ flex: 1 }}>
-                                  {expiryList.map((entry: any, idx: number) => (
-                                    <View
-                                      key={idx}
-                                      style={{
-                                        flexDirection: "row",
-                                        alignItems: "center",
-                                        marginBottom: 6,
-                                      }}
-                                    >
-                                      {/* Date Picker */}
-                                      <DateTimePickerModal
-                                        isVisible={entry.showPicker === true}
-                                        mode="date"
-                                        onConfirm={(date) => {
-                                          const isoDate = date
-                                            .toISOString()
-                                            .split("T")[0];
-                                          const updated = expiryList.map(
-                                            (e: any, i: number) =>
-                                              i === idx
-                                                ? {
-                                                    ...e,
-                                                    date: isoDate,
-                                                    showPicker: false,
-                                                  }
-                                                : e
-                                          );
-                                          handleChange(
-                                            "expiry",
-                                            sku.value,
-                                            updated
-                                          );
-                                        }}
-                                        onCancel={() => {
-                                          const updated = expiryList.map(
-                                            (e: any, i: number) =>
-                                              i === idx
-                                                ? { ...e, showPicker: false }
-                                                : e
-                                          );
-                                          handleChange(
-                                            "expiry",
-                                            sku.value,
-                                            updated
-                                          );
-                                        }}
-                                      />
+                                {/* Avg Offtake (auto-updating, read-only) */}
+                                <TextInput
+                                  style={[
+                                    styles.inputBox,
+                                    {
+                                      width: 70,
+                                      height: 40,
+                                      marginLeft: 6,
+                                      textAlign: "center",
+                                      backgroundColor: "#f0f0f0",
+                                      borderColor: "#aaa",
+                                      borderWidth: 1,
+                                    },
+                                  ]}
+                                  value={avgOfftake}
+                                  editable={false}
+                                />
 
-                                      <TouchableOpacity
-                                        style={[
-                                          styles.inputBox,
-                                          {
-                                            width: 120,
-                                            height: 40,
-                                            justifyContent: "center",
-                                            alignItems: "center",
-                                            marginRight: 6,
-                                            backgroundColor: "#fff",
-                                            borderColor: "#844515",
-                                            borderWidth: 1,
-                                          },
-                                        ]}
-                                        onPress={() => {
-                                          const updated = expiryList.map(
-                                            (e: any, i: number) =>
-                                              i === idx
-                                                ? { ...e, showPicker: true }
-                                                : e
-                                          );
-                                          handleChange(
-                                            "expiry",
-                                            sku.value,
-                                            updated
-                                          );
-                                        }}
-                                      >
-                                        <Text style={{ fontSize: 14 }}>
-                                          {entry.date
-                                            ? entry.date
-                                            : "Select Date"}
-                                        </Text>
-                                      </TouchableOpacity>
-
-                                      {/* Qty Input */}
-                                      <TextInput
-                                        placeholder="Qty"
-                                        placeholderTextColor={"grey"}
-                                        keyboardType="numeric"
-                                        style={[
-                                          styles.inputBox,
-                                          {
-                                            width: 60,
-                                            height: 40,
-                                            textAlign: "center",
-                                            backgroundColor: "#fff",
-                                            borderColor: "#844515",
-                                            borderWidth: 1,
-                                          },
-                                        ]}
-                                        value={entry.quantity?.toString() || ""}
-                                        onChangeText={(text) =>
-                                          handleChange(
-                                            "expiry",
-                                            sku.value,
-                                            expiryList.map(
-                                              (e: any, i: number) =>
-                                                i === idx
-                                                  ? {
-                                                      ...e,
-                                                      quantity: Number(text),
-                                                    }
-                                                  : e
-                                            )
-                                          )
-                                        }
-                                      />
-                                    </View>
-                                  ))}
-                                </View>
+                                {/* SO Input (editable) */}
+                                <TextInput
+                                  style={[
+                                    styles.inputBox,
+                                    {
+                                      width: 70,
+                                      height: 40,
+                                      marginLeft: 6,
+                                      textAlign: "center",
+                                      backgroundColor: "#fff",
+                                      borderColor: "#844515",
+                                      borderWidth: 1,
+                                    },
+                                  ]}
+                                  keyboardType="numeric"
+                                  value={soInput}
+                                  onChangeText={(text) =>
+                                    handleChange("soInput", sku.value, text)
+                                  }
+                                />
                               </View>
                             );
-                          })
-                        ) : field.key === "rtvNo" ? (
-                          // --- RTV No is single field ---
-                          <View style={{ marginVertical: 10 }}>
-                            {/* <Text
-                              style={{ fontWeight: "bold", marginBottom: 5 }}
-                            >
-                              RTV No
-                            </Text> */}
-                            <TextInput
-                              style={[
-                                styles.input,
-                                {
-                                  width: "100%",
-                                  height: 50,
-                                  marginLeft: 6,
-                                  textAlign: "center",
-                                  backgroundColor: "#f0f0f0",
-                                  borderRadius: 8,
-                                  borderColor: "#844515",
-                                  borderWidth: 1,
-                                  paddingHorizontal: 15,
-                                  marginBottom: 20,
-                                  color: "black",
-                                },
-                              ]}
-                              placeholder="Enter RTV No"
-                              placeholderTextColor="#000000ff"
-                              value={rtvNo}
-                              onChangeText={setRtvNo}
-                            />
-                          </View>
-                        ) : field.key === "suggestOrder" ? (
-                          <View style={{ marginTop: 10 }}>
-                            {(skuData[version] || []).map((sku: any) => {
-                              const carried = skuValues[version][sku.value];
+                          })}
+                        </View>
+                      ) : (
+                        // Beginning / Delivery / Ending / Offtake / OOS / RTV
+                        <View>
+                          {(skuData[version] || []).map((sku: any) => {
+                            const value =
+                              skuValues[version][sku.value][field.key] || "";
+                            const isOfftake = field.key === "offtake";
+                            const currentAvailability =
+                              availability[version]?.[sku.value] ?? "Carried";
+                            const isNotCarried =
+                              currentAvailability === "Not Carried";
 
-                              const beginning = Number(carried?.beginning || 0);
-                              const delivery = Number(carried?.delivery || 0);
-                              const rtv = Number(carried?.rtv || 0);
-                              const ending = Number(carried?.ending || 0);
-
-                              // current week's offtake
-                              const currentOfftake =
-                                beginning + delivery - rtv - ending;
-
-                              // use last week's average & count
-                              const prevSku = prevWeekData?.versions?.[
-                                version
-                              ]?.Carried?.find(
-                                (p: any) => p.skuCode === sku.value
-                              );
-                              const prevAvg = Number(prevSku?.avgOfftake || 0);
-                              const usageCount =
-                                Number(prevWeekData?.usageCount || 0) + 1;
-
-                              const avgOfftake =
-                                usageCount > 0
-                                  ? (
-                                      (prevAvg * (usageCount - 1) +
-                                        currentOfftake) /
-                                      usageCount
-                                    ).toFixed(2)
-                                  : "0.00";
-
-                              const soInput =
-                                carried?.soInput?.toString() || "";
-
-                              return (
+                            return (
+                              <View
+                                key={sku.value}
+                                style={{ marginBottom: 12 }}
+                              >
                                 <View
-                                  key={sku.value}
                                   style={{
                                     flexDirection: "row",
                                     alignItems: "center",
-                                    marginBottom: 8,
                                   }}
                                 >
                                   {/* SKU Name */}
-                                  <ScrollView
-                                    horizontal
-                                    style={{ flex: 1 }}
-                                    contentContainerStyle={{ paddingRight: 10 }}
-                                    scrollEnabled
-                                  >
-                                    <Text
-                                      style={styles.skuText}
-                                      numberOfLines={1}
-                                    >
-                                      {sku.label}
-                                    </Text>
-                                  </ScrollView>
+                                  <Text style={[styles.skuText, { flex: 1 }]}>
+                                    {sku.label}
+                                  </Text>
 
-                                  {/* Average Offtake (read-only, output only) */}
-                                  <TextInput
-                                    style={[
-                                      styles.inputBox,
-                                      {
-                                        width: 70,
-                                        height: 40,
-                                        marginLeft: 6,
-                                        textAlign: "center",
-                                        backgroundColor: "#f0f0f0",
-                                        borderColor: "#aaa",
+                                  {/* Dropdown only for Beginning */}
+                                  {field.key === "beginning" && (
+                                    <View
+                                      style={{
                                         borderWidth: 1,
-                                      },
-                                    ]}
-                                    value={avgOfftake}
-                                    editable={false}
-                                  />
-
-                                  {/* SO Input (editable) */}
-                                  <TextInput
-                                    style={[
-                                      styles.inputBox,
-                                      {
-                                        width: 70,
-                                        height: 40,
-                                        marginLeft: 6,
-                                        textAlign: "center",
-                                        backgroundColor: "#fff",
                                         borderColor: "#844515",
-                                        borderWidth: 1,
-                                      },
-                                    ]}
-                                    keyboardType="numeric"
-                                    value={soInput}
-                                    onChangeText={(text) =>
-                                      handleChange("soInput", sku.value, text)
-                                    }
-                                  />
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ) : (
-                          // Beginning / Delivery / Ending / Offtake / OOS
-                          <View>
-                            {(skuData[version] || []).map((sku: any) => {
-                              const value =
-                                skuValues[version][sku.value][field.key] || "";
-                              const isOfftake = field.key === "offtake";
-                              const currentAvailability =
-                                availability[version]?.[sku.value] ?? "Carried";
+                                        borderRadius: 6,
+                                        marginHorizontal: 8,
+                                        flex: 1,
+                                      }}
+                                    >
+                                      <Picker
+                                        selectedValue={currentAvailability}
+                                        onValueChange={(option: string) =>
+                                          setAvailability((prev) => ({
+                                            ...prev,
+                                            [version]: {
+                                              ...prev[version],
+                                              [sku.value]: option,
+                                            },
+                                          }))
+                                        }
+                                      >
+                                        <Picker.Item
+                                          label="Carried"
+                                          value="Carried"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                        <Picker.Item
+                                          label="Not Carried"
+                                          value="Not Carried"
+                                          style={{
+                                            fontSize: 11,
+                                            color: "black",
+                                          }}
+                                        />
+                                      </Picker>
+                                    </View>
+                                  )}
 
-                              return (
-                                <View
-                                  key={sku.value}
-                                  style={{ marginBottom: 12 }}
-                                >
-                                  <View
-                                    style={{
-                                      flexDirection: "row",
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    {/* SKU Name */}
-                                    <Text style={[styles.skuText, { flex: 1 }]}>
-                                      {sku.label}
-                                    </Text>
-
-                                    {/* Dropdown only for Beginning */}
-                                    {field.key === "beginning" && (
+                                  {/* RTV special: Reason + Qty */}
+                                  {field.key === "rtv" ? (
+                                    <View
+                                      style={{
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        flex: 1,
+                                        marginLeft: 8,
+                                      }}
+                                    >
+                                      {/* RTV Reason Dropdown */}
                                       <View
                                         style={{
-                                          borderWidth: 1,
-                                          borderColor: "#844515",
-                                          borderRadius: 6,
-                                          marginHorizontal: 8,
                                           flex: 1,
+                                          borderWidth: 1,
+                                          borderColor: isNotCarried
+                                            ? "#ccc"
+                                            : "#844515",
+                                          borderRadius: 6,
+                                          marginRight: 8,
+                                          backgroundColor: isNotCarried
+                                            ? "#f0f0f0"
+                                            : "#FFFFFF",
                                         }}
                                       >
                                         <Picker
-                                          selectedValue={currentAvailability}
-                                          onValueChange={(option) =>
-                                            setAvailability((prev) => ({
-                                              ...prev,
-                                              [version]: {
-                                                ...prev[version],
-                                                [sku.value]: option,
-                                              },
-                                            }))
+                                          enabled={!isNotCarried} // 🔒 lock if Not Carried
+                                          selectedValue={
+                                            skuValues[version]?.[sku.value]
+                                              ?.rtvReason || ""
                                           }
+                                          onValueChange={(reason) => {
+                                            // Update reason in the SKU object
+                                            handleChange(
+                                              "rtvReason",
+                                              sku.value,
+                                              reason
+                                            );
+
+                                            // If reason cleared, reset RTV qty
+                                            if (reason === "") {
+                                              handleChange(
+                                                "rtv",
+                                                sku.value,
+                                                ""
+                                              );
+                                            }
+                                          }}
+                                          mode="dropdown"
                                         >
                                           <Picker.Item
-                                            label="Carried"
-                                            value="Carried"
+                                            label="Select Reason"
+                                            value=""
                                             style={{
                                               fontSize: 11,
                                               color: "black",
                                             }}
                                           />
                                           <Picker.Item
-                                            label="Not Carried"
-                                            value="Not Carried"
+                                            label="Damaged"
+                                            value="Damaged"
+                                            style={{
+                                              fontSize: 11,
+                                              color: "black",
+                                            }}
+                                          />
+                                          <Picker.Item
+                                            label="Near Expiry"
+                                            value="Near Expiry"
+                                            style={{
+                                              fontSize: 11,
+                                              color: "black",
+                                            }}
+                                          />
+                                          <Picker.Item
+                                            label="Expired"
+                                            value="Expired"
+                                            style={{
+                                              fontSize: 11,
+                                              color: "black",
+                                            }}
+                                          />
+                                          <Picker.Item
+                                            label="Discoloration"
+                                            value="Discoloration"
+                                            style={{
+                                              fontSize: 11,
+                                              color: "black",
+                                            }}
+                                          />
+                                          <Picker.Item
+                                            label="Voluntary Pullout"
+                                            value="Voluntary Pullout"
+                                            style={{
+                                              fontSize: 11,
+                                              color: "black",
+                                            }}
+                                          />
+                                          <Picker.Item
+                                            label="Delivered Near Expiry"
+                                            value="Delivered Near Expiry"
                                             style={{
                                               fontSize: 11,
                                               color: "black",
@@ -1217,9 +1452,56 @@ export default function InventoryNextWeek() {
                                           />
                                         </Picker>
                                       </View>
-                                    )}
 
-                                    {/* Qty Input */}
+                                      {/* RTV Qty Input */}
+                                      <TextInput
+                                        style={[
+                                          styles.inputBox,
+                                          {
+                                            width: 60,
+                                            height: 40,
+                                            textAlign: "center",
+                                            backgroundColor:
+                                              isNotCarried ||
+                                              !skuValues[version]?.[sku.value]
+                                                ?.rtvReason
+                                                ? "#f0f0f0"
+                                                : "#FFFFFF",
+                                            borderColor:
+                                              isNotCarried ||
+                                              !skuValues[version]?.[sku.value]
+                                                ?.rtvReason
+                                                ? "#ccc"
+                                                : "#844515",
+                                            borderWidth: 1,
+                                          },
+                                        ]}
+                                        keyboardType="numeric"
+                                        value={
+                                          skuValues[version]?.[
+                                            sku.value
+                                          ]?.rtv?.toString() || ""
+                                        }
+                                        onChangeText={(text) => {
+                                          if (/^\d*$/.test(text)) {
+                                            handleChange(
+                                              "rtv",
+                                              sku.value,
+                                              text === ""
+                                                ? ""
+                                                : parseInt(text, 10)
+                                            );
+                                          }
+                                        }}
+                                        editable={
+                                          !isNotCarried &&
+                                          !!skuValues[version]?.[sku.value]
+                                            ?.rtvReason
+                                        } // 🔒 lock if Not Carried or no reason
+                                      />
+                                    </View>
+                                  ) : (
+                                    /* Other fields */
                                     <TextInput
                                       style={[
                                         styles.inputBox,
@@ -1227,24 +1509,26 @@ export default function InventoryNextWeek() {
                                           width: isOfftake ? 90 : 52,
                                           height: 40,
                                           textAlign: "center",
-                                          backgroundColor:
-                                            field.key === "rtv"
-                                              ? rtvNo
-                                                ? "#FFFFFF"
-                                                : "#f0f0f0"
-                                              : field.key === "oos" &&
-                                                Number(
-                                                  skuValues[version][sku.value]
-                                                    ?.ending
-                                                ) !== 0
+                                          backgroundColor: isNotCarried
+                                            ? "#f0f0f0"
+                                            : field.key === "beginning"
+                                            ? prevWeekData?.versions?.[
+                                                version
+                                              ]?.Carried?.some(
+                                                (p: any) =>
+                                                  p.skuCode === sku.value &&
+                                                  p.beginningPCS !== ""
+                                              )
                                               ? "#f0f0f0"
-                                              : field.key === "beginning"
-                                              ? "#f0f0f0" // 🔒 lock Beginning visually
-                                              : "#FFFFFF",
-                                          borderColor:
-                                            field.key === "rtv" && !rtvNo
-                                              ? "#ccc"
-                                              : "#844515",
+                                              : "#FFFFFF"
+                                            : field.key === "oos" &&
+                                              Number(
+                                                skuValues[version][sku.value]
+                                                  ?.ending
+                                              ) !== 0
+                                            ? "#f0f0f0"
+                                            : "#FFFFFF",
+                                          borderColor: "#844515",
                                           borderWidth: 1,
                                           marginLeft: 8,
                                         },
@@ -1253,7 +1537,6 @@ export default function InventoryNextWeek() {
                                         [
                                           "beginning",
                                           "delivery",
-                                          "rtv",
                                           "ending",
                                           "offtake",
                                           "oos",
@@ -1262,13 +1545,7 @@ export default function InventoryNextWeek() {
                                           : "default"
                                       }
                                       value={value}
-                                      onChangeText={(text) => {
-                                        if (field.key === "rtv" && !rtvNo) {
-                                          Alert.alert(
-                                            "Please enter RTV No first."
-                                          );
-                                          return;
-                                        }
+                                      onChangeText={(text: string) => {
                                         if (
                                           field.key === "oos" &&
                                           Number(
@@ -1282,9 +1559,6 @@ export default function InventoryNextWeek() {
                                           return;
                                         }
 
-                                        // prevent editing beginning
-                                        if (field.key === "beginning") return;
-
                                         handleChange(
                                           field.key,
                                           sku.value,
@@ -1292,10 +1566,16 @@ export default function InventoryNextWeek() {
                                         );
                                       }}
                                       editable={
-                                        field.key === "beginning"
-                                          ? false // 🔒 lock Beginning PCS
-                                          : field.key === "rtv"
-                                          ? !!rtvNo
+                                        isNotCarried
+                                          ? false
+                                          : field.key === "beginning"
+                                          ? !prevWeekData?.versions?.[
+                                              version
+                                            ]?.Carried?.some(
+                                              (p: any) =>
+                                                p.skuCode === sku.value &&
+                                                p.beginningPCS !== ""
+                                            )
                                           : field.key === "oos"
                                           ? Number(
                                               skuValues[version][sku.value]
@@ -1304,18 +1584,354 @@ export default function InventoryNextWeek() {
                                           : true
                                       }
                                     />
-                                  </View>
+                                  )}
+                                </View>
+                              </View>
+                            );
+                          })}
+
+                          {field.key === "offtake" && (
+                            <View style={{ marginTop: 16 }}>
+                              <TouchableOpacity
+                                onPress={() =>
+                                  setShowAdjustment(!showAdjustment)
+                                }
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 14,
+                                    fontWeight: "600",
+                                    color: "#844515",
+                                  }}
+                                >
+                                  Adjustment
+                                </Text>
+                                <Text
+                                  style={{ marginLeft: 6, color: "#844515" }}
+                                >
+                                  {showAdjustment ? "▲" : "▼"}
+                                </Text>
+                              </TouchableOpacity>
+
+                              {showAdjustment && (
+                                <View style={{ paddingLeft: 8 }}>
+                                  {(skuData[version] || []).map((sku: any) => {
+                                    const status =
+                                      availability[version]?.[sku.value] ||
+                                      "Carried"; // 👈 check availability
+                                    const isCarried = status === "Carried";
+
+                                    return (
+                                      <View
+                                        key={sku.value}
+                                        style={{
+                                          flexDirection: "row",
+                                          alignItems: "center",
+                                          marginBottom: 10,
+                                        }}
+                                      >
+                                        <Text
+                                          style={[styles.skuText, { flex: 1 }]}
+                                        >
+                                          {sku.label}
+                                        </Text>
+
+                                        {/* + Adjustment */}
+                                        <TextInput
+                                          placeholder="+"
+                                          placeholderTextColor="#000000ff"
+                                          keyboardType="numeric"
+                                          editable={isCarried} // 👈 disable if not carried
+                                          style={[
+                                            styles.inputBox,
+                                            {
+                                              width: 50,
+                                              height: 35,
+                                              textAlign: "center",
+                                              borderColor: isCarried
+                                                ? "#4CAF50"
+                                                : "#ccc",
+                                              borderWidth: 1,
+                                              marginHorizontal: 4,
+                                              color: isCarried
+                                                ? "#000000ff"
+                                                : "#999",
+                                            },
+                                          ]}
+                                          value={
+                                            skuValues[version][sku.value]
+                                              ?.adjustPlus || ""
+                                          }
+                                          onChangeText={(text) =>
+                                            isCarried &&
+                                            handleChange(
+                                              "adjustPlus",
+                                              sku.value,
+                                              text
+                                            )
+                                          }
+                                        />
+
+                                        {/* - Adjustment */}
+                                        <TextInput
+                                          placeholder="-"
+                                          placeholderTextColor="#000000ff"
+                                          keyboardType="numeric"
+                                          editable={isCarried} // 👈 disable if not carried
+                                          style={[
+                                            styles.inputBox,
+                                            {
+                                              width: 50,
+                                              height: 35,
+                                              textAlign: "center",
+                                              borderColor: isCarried
+                                                ? "#F44336"
+                                                : "#ccc",
+                                              borderWidth: 1,
+                                              marginHorizontal: 4,
+                                              color: isCarried
+                                                ? "#F44336"
+                                                : "#999",
+                                            },
+                                          ]}
+                                          value={
+                                            skuValues[version][sku.value]
+                                              ?.adjustMinus || ""
+                                          }
+                                          onChangeText={(text) =>
+                                            isCarried &&
+                                            handleChange(
+                                              "adjustMinus",
+                                              sku.value,
+                                              text
+                                            )
+                                          }
+                                        />
+                                      </View>
+                                    );
+                                  })}
+                                </View>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Add Harvest section as a separate field right after offtake field for MVP version */}
+                  {field.key === "offtake" && version === "MVP" && (
+                    <View key="harvest" style={{ marginTop: 15 }}>
+                      <TouchableOpacity
+                        style={styles.expandButton}
+                        onPress={() =>
+                          setExpandedSection((prev: string | null) =>
+                            prev === "Harvest" ? null : "Harvest"
+                          )
+                        }
+                      >
+                        <Text style={styles.expandButtonText}>
+                          {expandedSection === "Harvest"
+                            ? `Hide Harvest`
+                            : `Expand Harvest`}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {expandedSection === "Harvest" && (
+                        <View style={{ marginTop: 10 }}>
+                          <View>
+                            {(skuData.MVP || []).map((skuItem: any) => {
+                              const currentAvailability =
+                                availability?.MVP?.[skuItem.value] ?? "Carried";
+                              const isNotCarried =
+                                currentAvailability === "Not Carried";
+
+                              const existing =
+                                skuValues?.MVP?.[skuItem.value]?.harvest || [];
+                              const harvestEntries = existing.concat(
+                                Array.from(
+                                  { length: Math.max(0, 6 - existing.length) },
+                                  () => ({
+                                    date: "",
+                                    quantity: "",
+                                  })
+                                )
+                              );
+
+                              return (
+                                <View
+                                  key={skuItem.value}
+                                  style={{ marginBottom: 16 }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.skuText,
+                                      { marginBottom: 6 },
+                                    ]}
+                                  >
+                                    {skuItem.label}
+                                  </Text>
+
+                                  {harvestEntries.map(
+                                    (entry: any, index: number) => (
+                                      <View
+                                        key={`${skuItem.value}-${index}`}
+                                        style={{
+                                          flexDirection: "row",
+                                          alignItems: "center",
+                                          marginBottom: 8,
+                                        }}
+                                      >
+                                        {/* Date Picker */}
+                                        <View
+                                          style={{
+                                            flex: 3,
+                                            marginHorizontal: 8,
+                                          }}
+                                        >
+                                          <TouchableOpacity
+                                            activeOpacity={
+                                              isNotCarried ? 1 : 0.7
+                                            } // no visual feedback if disabled
+                                            style={{
+                                              flex: 3,
+                                              marginHorizontal: 8,
+                                              borderWidth: 1,
+                                              borderColor: "#ccc",
+                                              borderRadius: 4,
+                                              paddingVertical: 10,
+                                              paddingHorizontal: 12,
+                                              backgroundColor: isNotCarried
+                                                ? "#f0f0f0"
+                                                : "#fff",
+                                            }}
+                                            onPress={() => {
+                                              if (isNotCarried) return; // 👈 hard block
+                                              setShowDatePicker({
+                                                visible: true,
+                                                skuKey: skuItem.value,
+                                                idx: index,
+                                              });
+                                            }}
+                                          >
+                                            <Text
+                                              style={{
+                                                fontSize: 14,
+                                                color: isNotCarried
+                                                  ? "grey"
+                                                  : "black",
+                                              }}
+                                            >
+                                              {entry.date
+                                                ? (() => {
+                                                    const d = new Date(
+                                                      entry.date
+                                                    );
+                                                    return `${String(
+                                                      d.getMonth() + 1
+                                                    ).padStart(
+                                                      2,
+                                                      "0"
+                                                    )}-${String(
+                                                      d.getDate()
+                                                    ).padStart(
+                                                      2,
+                                                      "0"
+                                                    )}-${d.getFullYear()}`;
+                                                  })()
+                                                : "Select Date"}
+                                            </Text>
+                                          </TouchableOpacity>
+
+                                          {showDatePicker?.skuKey ===
+                                            skuItem.value &&
+                                            showDatePicker?.idx === index && (
+                                              <DateTimePicker
+                                                value={
+                                                  entry.date
+                                                    ? new Date(entry.date)
+                                                    : new Date()
+                                                }
+                                                mode="date"
+                                                display="default"
+                                                onChange={(
+                                                  event: any,
+                                                  selectedDate?: Date
+                                                ) => {
+                                                  if (
+                                                    event.type === "set" &&
+                                                    selectedDate
+                                                  ) {
+                                                    const iso = selectedDate
+                                                      .toISOString()
+                                                      .split("T")[0];
+                                                    handleHarvestEntryChange(
+                                                      skuItem.value,
+                                                      index,
+                                                      "date",
+                                                      iso
+                                                    );
+                                                  }
+                                                  setShowDatePicker({
+                                                    visible: false,
+                                                    skuKey: null,
+                                                    idx: null,
+                                                  });
+                                                }}
+                                              />
+                                            )}
+                                        </View>
+
+                                        {/* Quantity Field */}
+                                        <TextInput
+                                          placeholder="Qty"
+                                          placeholderTextColor="grey"
+                                          editable={!!entry.date} // ✅ disable until a date is picked
+                                          style={[
+                                            styles.inputBox,
+                                            {
+                                              flex: 2,
+                                              height: 40,
+                                              fontSize: 14,
+                                              textAlign: "center",
+                                              backgroundColor: entry.date
+                                                ? "#fff"
+                                                : "#f0f0f0", // greyed out if no date
+                                              borderColor: entry.date
+                                                ? "#844515"
+                                                : "#ccc",
+                                              borderWidth: 1,
+                                              color: entry.date
+                                                ? "black"
+                                                : "grey", // font color changes too
+                                            },
+                                          ]}
+                                          keyboardType="numeric"
+                                          value={
+                                            entry.quantity?.toString() || ""
+                                          }
+                                        />
+                                      </View>
+                                    )
+                                  )}
                                 </View>
                               );
                             })}
                           </View>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                );
-              })
-            ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+
+          {/* Remove the separate Harvest section that was at the bottom */}
         </ScrollView>
         <View style={[styles.buttonRow, { justifyContent: "space-between" }]}>
           <TouchableOpacity
